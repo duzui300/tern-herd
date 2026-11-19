@@ -66,6 +66,7 @@ export type WindowRequest = {
 	label: string,
 	hc: string,
 	mode: ("read" | "write")?,
+	agent: boolean?,
 	expires: number,
 	owner: string?,
 	viewer_owner: string?,

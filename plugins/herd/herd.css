@@ -17,17 +17,17 @@
   border-bottom: 1px solid var(--l1);
 }
 
-/* Summary tiles in a recessed well container (1x4 normally, 2x2 when ultra-narrow). */
+/* Summary tiles sit directly on the page: separators, never a card. */
 .sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats'],
 .sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats-compact'] {
   box-sizing: border-box;
   width: 100%;
   margin-left: 0;
   clip-path: none;
-  background: var(--well);
-  border: 1px solid var(--well-line);
-  border-radius: var(--r-card);
-  padding: 8px 14px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
 }
 
 .sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats'] {
@@ -71,14 +71,8 @@
   padding: 0;
 }
 
-/* Session table card: neutralize Tern's -7px grid overhang so rounded borders never
-   clip leading cell padding or the selected accent bar, and indent Terminal text cleanly. */
-.sf-main[data-role='herd.console'] .sf-table {
-  background: var(--card);
-  border: 1px solid var(--l1);
-  border-radius: var(--r-card);
-  overflow: hidden;
-}
+/* Full-width table on the page; the leading rule keeps the selection bar
+   aligned with the page gutter instead of inside a card. */
 
 .sf-main[data-role='herd.console'] .sf-tbl {
   margin-left: 0;
@@ -88,7 +82,7 @@
 
 .sf-main[data-role='herd.console'] .sf-tbl-h:first-child,
 .sf-main[data-role='herd.console'] .sf-tbl-c:first-child {
-  padding-left: 15px;
+  padding-left: 0;
   border-left: 3px solid transparent;
 }
 
@@ -148,10 +142,15 @@
 }
 
 .sf-main[data-role='herd.console'] [data-role='herd.activity.event'] {
-  padding: 8px 10px;
-  border-radius: var(--r-ctl);
-  border: 1px solid var(--l1);
-  background: var(--well);
+  padding: 6px 0;
+  border: 0;
+  border-bottom: 1px solid var(--l1);
+  border-radius: 0;
+  background: none;
+}
+
+.sf-main[data-role='herd.console'] [data-role='herd.activity.event']:last-child {
+  border-bottom: 0;
 }
 
 /* Compact dock bar anchored to the bottom hairline. */
@@ -159,4 +158,16 @@
   background: var(--panel);
   border-top: 1px solid var(--l1);
   padding: 6px 16px !important;
+}
+
+/* Head controls keep keycaps out of the way until hover or keyboard focus. */
+.sf-main[data-role='herd.console'] [data-role='herd.head'] .sf-button .kbd {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.sf-main[data-role='herd.console'] [data-role='herd.head'] .sf-button:hover .kbd,
+.sf-main[data-role='herd.console'] [data-role='herd.head'] .sf-button:focus-visible .kbd,
+.sf-main[data-role='herd.console'] [data-role='herd.head'] .sf-button:focus-within .kbd {
+  opacity: 1;
 }

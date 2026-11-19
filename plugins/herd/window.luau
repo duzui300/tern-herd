@@ -171,13 +171,13 @@ tern.bind(needs_prefix .. "y", "plugin.herd.previous_needs")
 local function choose_scope(cx: WindowCx, block: number, request: common.WindowRequest)
 	local items: { PickItem } = {
 		{ label = "All terminals", run = "", current = request.address == "" },
-		{ label = "Enter run label…", typed = true, detail = "Type a run label" },
+		{ label = "Custom label…", typed = true, detail = "Type a run label" },
 	}
 	local scopes: { string } = request.scopes or {}
 	for _, run in scopes do
-		table.insert(items, { label = "Run " .. run, run = run, current = request.address == run })
+		table.insert(items, { label = "Run: " .. run, run = run, current = request.address == run })
 	end
-	cx:pick({ items = items, placeholder = "Choose Herd run scope", icon = "users" })
+	cx:pick({ items = items, placeholder = "Choose run scope", icon = "users" })
 		:next(function(choice: PickItem?, _err: string?, wcx: WindowCx?)
 			if not choice or not wcx then
 				local fcx = wcx or cx
@@ -185,7 +185,7 @@ local function choose_scope(cx: WindowCx, block: number, request: common.WindowR
 				return
 			end
 			if choice.typed then
-				wcx:prompt({ placeholder = "Run label (run=…)", action = "switch" })
+				wcx:prompt({ placeholder = "Run label", action = "switch" })
 					:next(function(value: string?, _why: string?, current: WindowCx?)
 						if value and current then
 							current.session:event(block, { ev = "action", id = "main", act = "herd_scope=" .. tern.json.encode(value) })
@@ -223,17 +223,28 @@ end
 
 -- Writable Attach always creates a split. Only registered read-only viewers
 -- participate in Watch reuse and its float/dock/park controls.
-local function create_viewer(cx: WindowCx, beside: number, address: string, mode: viewers.Mode, binary: string): number?
+local function create_viewer(cx: WindowCx, beside: number, address: string, mode: viewers.Mode, binary: string, agent: boolean?): number?
 	local win = tern.runtime.os == "windows"
 	local line = common.quote(binary, win) .. " attach "
 	if mode == "read" then
 		line ..= "--observe --history 200 "
 	end
 	line ..= common.quote(address, win)
-	local pane = cx.layout:split(beside, "right", { command = line }, { focus = true })
+	local pane
+	if mode == "read" and agent then
+		-- A full-screen agent TUI needs its own tab; a half-width split
+		-- reflows and garbles the newest frame.
+		pane = cx.layout:new_tab({ command = line }, { focus = true })
+	else
+		pane = cx.layout:split(beside, "right", { command = line }, { focus = true })
+	end
 	if pane == nil then
-		cx:toast("error", "Could not open a split for " .. address, line)
+		cx:toast("error", "Could not open a viewer for " .. address, line)
 		return nil
+	end
+	if mode == "read" and agent then
+		local info = cx.session:pane(pane)
+		if info and info.tab then cx.layout:name_tab(info.tab, "Watch " .. address) end
 	end
 	local recorded, why = viewers.record(cx, beside, binary, address, mode, pane)
 	if not recorded then cx:toast("error", "Viewer opened but could not be remembered", why) end
@@ -257,7 +268,7 @@ local function use_viewer(cx: WindowCx, source: number, request: common.WindowRe
 		return
 	end
 	if mode == "write" then
-		create_viewer(cx, source, address, mode, request.hc)
+		create_viewer(cx, source, address, mode, request.hc, request.agent)
 		return
 	end
 	local pane, why = viewers.find(cx, source, request.hc, address, "read")
@@ -272,7 +283,7 @@ local function use_viewer(cx: WindowCx, source: number, request: common.WindowRe
 			viewer_notice(cx, source, request, "No Watch viewer for " .. label .. ". Open Watch first.")
 			return
 		end
-		pane = create_viewer(cx, source, address, "read", request.hc)
+		pane = create_viewer(cx, source, address, "read", request.hc, request.agent)
 		if pane == nil or verb == "watch" then return end
 	end
 	local viewer = pane :: number
@@ -306,6 +317,9 @@ local function use_viewer(cx: WindowCx, source: number, request: common.WindowRe
 		if cx.session:pane(viewer) == nil then
 			cx:toast("error", "Watch viewer is no longer available", label)
 			return
+		end
+		if request.agent then
+			cx.layout:move_to_new_tab(viewer, nil, { focus = false })
 		end
 		cx.layout:focus(viewer)
 		return
@@ -369,10 +383,10 @@ end
 local function ask_interrupt(cx: WindowCx, block: number, address: string, label: string, generation: number?)
 	cx:pick({
 		items = {
-			{ label = "Interrupt " .. label, detail = "hc interrupt " .. address, icon = "stop", go = true },
+			{ label = "Interrupt " .. label, detail = "Sends Ctrl+C to " .. address .. "; the current turn stops.", icon = "stop", go = true },
 			{ label = "Cancel", icon = "x", go = false },
 		},
-		placeholder = "Interrupt " .. label .. " with the stop key?",
+		placeholder = "Interrupt " .. label .. "?",
 		icon = "stop",
 		action = "choose",
 	}):next(function(choice: PickItem?, _err: string?, cx2: WindowCx?)
@@ -572,7 +586,11 @@ local function report_viewer(cx: WindowCx, source: number, props: { [string]: an
 		return
 	end
 	known.claim_since, known.claim_at = nil, nil
-	local state, pane = viewers.state(cx, source, props.herd_hc, props.herd_cursor)
+	local ok, state, pane = pcall(viewers.state, cx, source, props.herd_hc, props.herd_cursor)
+	if not ok then
+		known.feedback = nil
+		return
+	end
 	local snapshot = tern.json.encode({
 		generation = props.herd_generation, selection = props.herd_selection,
 		address = props.herd_cursor, hc = props.herd_hc, state = state, pane = pane,
@@ -713,6 +731,6 @@ tern.chrome.status(function(_pane: StatusPaneInfo): { StatusSegment }?
 	if s.unread > 0 then
 		text ..= " · " .. s.unread .. " unread"
 	end
-	local tone = if s.errors > 0 then "error" elseif s.blocked > 0 then "warning" elseif s.working > 0 then "info" else "muted"
+	local tone = if s.errors > 0 then "error" elseif s.blocked > 0 then "warning" elseif s.working > 0 then "accent" else "muted"
 	return { { text = text, icon = "users", tone = tone, command = ACTION } }
 end)

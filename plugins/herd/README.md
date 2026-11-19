@@ -8,22 +8,22 @@ Requires **Tern 0.9.12 or later** and herdr-core **0.1.18 or later**. Linux and 
 tested; macOS is untested.
 
 ```
-Herd   herdr-core · updated 22:42:24                     [Finished h] [Mute m] [Refresh r]
+Herd   herdr-core                     [Scope… u] [Activity v] 5 [Show finished h] [Mute toasts m] [Refresh r]
 
-Machines        Worktrees          Turns              Finished
-2               9                  108                21
-all connected   one per terminal   most 104 · t1n     hidden · h shows
+Worktrees        Turns
+9                108
+                 most 104 (t1n)
 
  All   Needs you 1   Working   Done
-Parents before their children · 9 of 9                  ┌ b1-cart  t3n          [Watch ⏎] ┐
-Terminal              Agent    Status          Turn  Worktree │ Status working · for 14m (from hc) │
-t1n                   hermes   ● done            104 shop     │ Agent     codex              │
-├─ b1-cart  t3n       codex    ● working 14m       1 cart     │ Model     gpt-6-astra        │
-├─ b2-checkout t3p    codex    ● blocked  2m       2 checkout │ Worktree  ~/code/shop/…/cart │
-└─ gate-cart t4a      sh       –                   0 cart     │ [Attach a] [Logs l] [Send… s] │
-                                                              │ [Worktree w] [Focus f]        │
-                                                              │               [Interrupt… x] │
-                                                              └───────────────────────────────┘
+Terminal              Agent    Status          Turn  Worktree │ ┌ b1-cart  t3n          [Watch ⏎] ┐
+t1n                   hermes   ● done            104 shop     │ Status working · for 14m │
+├─ b1-cart  t3n       codex    ● working 14m       1 cart     │ Agent     codex          │
+├─ b2-checkout t3p    codex    ● blocked  2m       2 checkout │ Model     gpt-6-astra    │
+└─ gate-cart t4a      sh       –                   0 cart     │ Worktree  ~/code/shop/…  │
+                                                             │ [Attach a] [Logs l] [Send… s] │
+                                                             │ [Worktree w] [Focus subtree f] │
+                                                             │               [Interrupt… x] │
+                                                             └───────────────────────────┘
 ↑↓ select  home/end jump  enter watch  1–4 tab filter
 ```
 
@@ -32,21 +32,21 @@ t1n                   hermes   ● done            104 shop     │ Agent     co
 The block opens in Tern's sans face and follows Tern's page layout (Designing
 Views):
 
-- **Head row**: the title, `herdr-core · updated HH:MM:SS` and the current
-  run label, with **Run…** (`u`), **Activity** (`v`, with an unread badge),
-  **Finished** (`h`), **Mute** (`m`) and **Refresh** (`r`) controls. Run scopes
-  switch in place; All terminals is the unfiltered scope. Finished only
-  controls row visibility; Mute turns toasts off, not history recording.
-  Subtree focus appears in the head metadata as `focus <terminal>`. When `hc ls` fails after a list
-  has loaded, the meta says `stale, 40s old` in the warning tone and the last
-  list stays on screen.
-- **Stats** (four tiles): facts about the run that the tabs don't already
-  count. **Machines**: this one plus the remote machines hc lists (warning
-  tone and "N unreachable" when hc can't reach some). **Worktrees**: distinct
-  working directories of the listed terminals ("N shared" when terminals
-  share one). **Turns**: hc's turn counters summed, with the busiest
-  terminal. **Finished**: how many finished terminals are hidden (or, with
-  `h` on, listed). The status counts live in the filter tabs instead: Tern's
+- **Head row**: the title, `herdr-core` and the current run label, with
+  **Scope…** (`u`), **Activity** (`v`, with an unread badge),
+  **Show finished** (`h`), **Mute toasts** (`m`) and **Refresh** (`r`)
+  controls. Run scopes switch in place; All terminals is the unfiltered
+  scope. Show finished only controls row visibility; Mute toasts turns
+  toasts off, not history recording. Subtree focus appears as `focus
+  <terminal>`. When `hc ls` fails after a list has loaded, the meta says
+  `stale, 40s old` in the warning tone and the last list stays on screen.
+- **Stats** (up to four tiles): facts about the run that the tabs don't already
+  count, directly on the page without a card. **Machines** appears only with
+  remote machines (warning tone and "N unreachable" when hc can't reach
+  some). **Worktrees** is the number of distinct working directories.
+  **Turns** sums hc's turn counters, naming the busiest terminal when there is
+  one. **Finished** appears only when some are hidden (or, with `h` on,
+  listed). The status counts live in the filter tabs instead: Tern's
   `StatItem` is only `label`, `value`, `sub`, `tone` and `title`, and a
   stats strip's actions fire for the whole strip, so a tile can't be a
   clickable filter with a selected state; tabs can.
@@ -66,9 +66,9 @@ Views):
     `app-hermes`, `app-omp`, `app-claude`, `pi-mark`, shells as `terminal`, …),
     otherwise just the name.
   - Status: a dot in the status tone, the word, and how long it has said it.
-    working = info, blocked = warning (bold), error = error (bold), done =
+    working = accent, blocked = warning (bold), error = error (bold), done =
     success, idle and finished = muted (the same tones in the status-line
-    segment; info keeps working visibly apart from done's green). A finished
+    segment; accent keeps working visibly apart from done's green). A finished
     terminal shows its exit code. Plain programs report no status and show
     `–`. The time is only shown
     once this block has *seen* the status change: a terminal seen for the
@@ -82,16 +82,14 @@ Views):
     column and otherwise with the distinctive leaf on its own line.
   - Where: hc's `where`, only when the shown rows don't all say the same
     (a uniform value stays in the card and takes no room in the table).
-- **The selected terminal's card**: beside the table in a wide pane, under it
-  in a narrow one. Head: the name, address and agent icon, with the one
-  primary action, **Watch** (Enter). Facts: status with how long and where
-  that age comes from — `for 12m (from hc)` is `hc get`'s own `status_ms`
-  (when hc still reports the same word), `for 3m (seen by Herd)` is a change
-  this block saw between two polls, and `age unknown` is neither (never `created_ms`);
-  the blocked kind; what the
-  program says, agent (and the foreground program when it differs), model
-  (from the command line's `-m`/`--model`, or `—` when unknown), turn, started (relative),
-  exit code / signal / reason once finished, parent, number of children,
+- **The selected terminal's card**: beside the table in a wide pane, above it
+  in a narrow one; the only card on the page. Head: the name, address and agent
+  icon, with the one primary action, **Watch** (Enter). Facts: status and how
+  long it has said it, the blocked kind, what the program says, agent (and the
+  foreground program when it differs), model only when the command line names
+  one, turn, started (relative), exit code / signal / reason once finished,
+  parent, children only when there are some, full worktree path, where, and
+  the `run` label. Until the first `hc get`
   full worktree path, where, and the `run` label. Until the first `hc get`
   answers, the facts start with a shimmering fetching message
   (`Fetching details from build-box…`,
@@ -99,7 +97,8 @@ Views):
   `fetching…`; after a failure they say what is missing and hc's error shows
   under them. Its buttons come in fixed
   groups: **Attach**, **Logs**, **Send…** (what reaches the terminal), then
-  **Worktree** and **Focus** (where to look), then applicable read-only viewer
+  **Worktree** and **Focus subtree** (where to look; the latter is disabled
+  when the terminal has no children), then applicable read-only viewer
   controls: tiled shows **Float Watch** / **Park Watch**, floating shows
   **Dock Watch** / **Park Watch**, absent or parked shows none. Only matching
   local **Report**, **Review** and **Brief** artifact buttons appear, then
@@ -112,12 +111,14 @@ Views):
 - **Activity inbox**: `v` replaces the terminal view with the newest observed
   transitions for the current run scope. Its rows contain timestamps,
   terminal names/addresses, statuses and exit codes, never terminal output.
-  Opening does not mark read; **Mark read**, **Clear** and **Back** are explicit
-  controls. The bounded list scrolls and the head stays available.
+  Opening does not mark read; **Mark read**, **Clear…** and **Back** are
+  explicit controls. Clear… asks in place before removing the scope's
+  activity. Unread rows carry an `unread` badge; read rows do not.
 - **Dock**: a one-line notice (sent, interrupted, refused, left the list),
   the refresh problem while a stale list shows, and a compact navigation
-  legend: ↑↓ select, Home/End jump, Enter watch, 1–4/Tab filter and `[`/`]`
-  previous/next needs-you. Visible action buttons show their keycaps; hidden
+  legend: ↑↓ select, Home/End jump, 1–4/Tab filter and `[`/`]`
+  previous/next needs-you. Head controls reveal their keycaps on hover or
+  keyboard focus; detail buttons keep theirs. Hidden
   viewer buttons do not remove the `p`/`d`/`z` shortcuts documented below.
 
 ### Width
@@ -138,7 +139,7 @@ letting the table hide columns on its own:
   same order, so if Tern runs short it drops Where, then Agent, then Turn).
 - The card sits beside the table (40–48ch) only when the table keeps
   Terminal, Status, Worktree, Turn and Agent next to it; otherwise it goes
-  under the table at full width.
+  above the table at full width.
 - The head always keeps its action labels. Native flex wraps the actions
   below the title (and the buttons themselves if needed) at the actual
   available width; it does not use `cx.cols` to decide whether they fit.
@@ -147,7 +148,7 @@ letting the table hide columns on its own:
   three-plus-one wrap. The strip and first tile align with the title gutter.
   The keyboard legend is shorter in compact layouts.
 - The card's Worktree line estimates its value column from the card's width
-  (48 cells beside the table, the pane less its padding under it) less the
+  (48 cells beside the table, the pane less its padding on a narrow pane) less the
   card's insets, the key column and the gap, and breaks before the leaf only
   when the full `~` path is longer than that.
 - Height comes from the window's actual layout, not a `cx.rows` budget.
@@ -202,7 +203,7 @@ focuses the block.
 | ] / [ | select next / previous blocked or errored terminal in the current run scope |
 | 1 2 3 4, Tab ⇧Tab | filter: All, Needs you, Working, Done |
 | u | choose All terminals or a remembered/typed run label without reopening |
-| Enter / o (or double-click a row) | focus the existing read-only Watch viewer, or open `hc attach --observe --history 200 <t>` to the right; unpark it if hidden. Nothing you type reaches the agent and the terminal isn't resized |
+| Enter / o (or double-click a row) | focus the existing read-only Watch viewer, or open `hc attach --observe --history 200 <t>`; agent terminals get a tab of their own (`Watch <address>`) so a full-screen TUI keeps its width, plain terminals split to the right; unpark it if hidden. Nothing you type reaches the agent and the terminal isn't resized |
 | a | attach: always open a new writable `hc attach <t>` split, to type into it |
 | p | float the selected terminal's read-only Watch viewer as a peek/PiP; open one if absent; already floating or parked gives a dock notice |
 | d | dock the selected terminal's floating Watch viewer; absent, already tiled or parked gives a dock notice |
@@ -211,7 +212,7 @@ focuses the block.
 | s | send: asks for a prompt, asks again to confirm, then runs `hc send <t> <text>` (never `--force`) |
 | x | interrupt: asks to confirm, then runs `hc interrupt <t>`. Refused for done, idle and finished terminals, and checked again after you confirm |
 | w | worktree: opens a git block on the terminal's working directory (`cx.git:open`, beside). Local terminals only |
-| f | focus: show only the selected terminal and its descendants; `f` again clears it |
+| f | focus subtree: show only the selected terminal and its descendants; `f` again clears it |
 | h | show or hide finished terminal rows; observation always includes them |
 | v | toggle Activity; opening it does not mark read |
 | m | mute or unmute toasts |
@@ -229,6 +230,9 @@ saved, so a reload or restart keeps them.
 
 Watch reuses only viewers created by Herd with the same window, source Tern
 host/session, resolved `hc` executable, terminal address and read-only mode.
+Agent terminals open their viewer in a new tab named `Watch <address>`; the
+full-width tab keeps a full-screen TUI from reflowing the newest frame. Plain
+terminals keep the split to the right.
 It never guesses from a title or changing foreground command, and never reuses
 a writable Attach for Watch. **Float Watch**, **Dock Watch** and **Park Watch**
 also target only that registered read-only viewer. Card controls reflect its
@@ -340,11 +344,11 @@ is bounded to 32 consoles and pruned when panes or sessions disappear.
 
 ### Run scopes
 
-Press **u**, click **Run…**, or choose **Choose Herd run scope**
+Press **u**, click **Scope…**, or choose **Choose run scope**
 (`plugin.herd.scope`) from any tab. If there is no console, the command opens
 one before presenting the picker; restoring that console later does not reopen
 the picker. Choose **All terminals**, one of the 12 recent run labels, or
-**Enter run label…**. Opening the picker makes one
+**Custom label…**. Opening the picker makes one
 `hc --json` request: unlike the reduced `hc ls --json` projection, the bare
 JSON command retains `Terminal.labels`, so available run labels can be discovered
 without per-row `get` polling. Installed hc **0.1.18** was verified to return
@@ -356,7 +360,7 @@ run-label discovery and scoped rows. At most 12 distinct labels join the recent
 list; cached selected-terminal labels are remembered too. Discovery is not a
 complete inventory: finished/removed runs and unreachable machines can be absent.
 If discovery fails, remembered and typed labels work.
-The current scope appears in the head, tab title and status segment.
+The current scope appears in the head and status segment.
 
 The block saves its scope; `run=<id>` is only the initial default. Scope
 switching clears list/detail caches, logs, subtree focus and pending mailbox
@@ -384,8 +388,8 @@ The newest 100 events are shared by all consoles on this Tern host. The head
 badge, tab title and status segment show the current scope's unread count.
 Rows show only timestamp, name/address, status, optional exit code and read
 state. Opening or closing the inbox does not mark anything read. **Mark read**
-marks the retained events in this scope; **Clear** removes them but keeps
-transition baselines, so the next identical poll does not recreate them.
+marks the retained events in this scope; **Clear…** asks in place, then removes
+them but keeps transition baselines, so the next identical poll does not recreate them.
 Both changes propagate to every live console. An event's read/removal state is
 shared across All terminals and any run scopes that include it.
 **Back**, **v** or **Esc** returns to the terminal view without discarding its

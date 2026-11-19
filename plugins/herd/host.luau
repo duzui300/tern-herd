@@ -169,6 +169,7 @@ type State = {
 	-- How many remote machines hc lists (reachable or not).
 	remotes: number,
 	loading: boolean,
+	manual: boolean?,
 	gen: number,
 	scope_epoch: number,
 	fetched: number?,
@@ -183,6 +184,7 @@ type State = {
 	inbox: boolean,
 	activity: { activity.Event },
 	unread: number,
+	clear_armed: boolean?,
 	activity_problem: string?,
 	details: { [string]: Detail },
 	detail_timer: TimerHandle?,
@@ -265,6 +267,7 @@ local function retire(state: State)
 	end
 	-- Pending processes may still call back; they check `alive` first.
 	state.loading = false
+	state.manual = nil
 	state.terms = nil
 	state.rows = {}
 	state.details = {}
@@ -926,11 +929,12 @@ local function ls_args(state: State): { string }
 	return args
 end
 
-local function refresh(state: State)
+local function refresh(state: State, manual: boolean?)
 	if not alive(state) or state.loading then
 		return
 	end
 	state.loading = true
+	state.manual = manual
 	local gen = state.gen
 	local request_at = tern.now()
 	local spawn_error = run_hc(ls_args(state), LS_TIMEOUT_MS, function(result)
@@ -938,6 +942,7 @@ local function refresh(state: State)
 			return
 		end
 		state.loading = false
+		state.manual = nil
 		if gen ~= state.gen then
 			-- The run scope changed while this request was in flight.
 			refresh(state)
@@ -978,6 +983,7 @@ local function refresh(state: State)
 	end)
 	if spawn_error then
 		state.loading = false
+		state.manual = nil
 		state.problem = { kind = "missing", text = "Tern could not start hc.", detail = spawn_error }
 		state.cx:render()
 	end
@@ -1138,7 +1144,7 @@ end
 -- Views.
 
 local TONES: { [string]: string } = {
-	working = "info",
+	working = "accent",
 	blocked = "warning",
 	error = "error",
 	done = "success",
@@ -1148,7 +1154,7 @@ local TONES: { [string]: string } = {
 
 -- The status word's span tokens: blocked and error take a weight step.
 local WORDS: { [string]: string } = {
-	working = "info",
+	working = "accent",
 	blocked = "warning strong",
 	error = "error strong",
 	done = "success",
@@ -1188,6 +1194,26 @@ local AGENT_ICONS: { [string]: string } = {
 	cmd = "terminal",
 	["cmd.exe"] = "terminal",
 }
+
+-- Agents drive a full-screen TUI; a Watch viewer gives them a tab of their
+-- own so its width matches the source instead of wrapping the newest frame.
+local AGENT_NAMES: { [string]: boolean } = {
+	claude = true, codex = true, hermes = true, omp = true, pi = true,
+	antigravity = true, agy = true, opencode = true, gemini = true,
+	["claude-code"] = true,
+}
+
+local function agent_like(t: Term): boolean
+	if (t.turn or 0) > 0 then return true end
+	local name = string.gsub(string.lower(t.agent), "\\", "/")
+	name = string.match(name, "([^/]+)$") or name
+	name = string.match(name, "^(.-)%.[%a%d]+$") or name
+	if AGENT_NAMES[name] then return true end
+	for _, prefix in ipairs({ "claude-", "codex-", "hermes-", "antigravity-", "opencode-", "gemini-" }) do
+		if string.sub(name, 1, #prefix) == prefix then return true end
+	end
+	return false
+end
 
 local function button(label: string, action: string, props: { [string]: any }?): Node
 	local p: { [string]: any } = props or {}
@@ -1372,11 +1398,12 @@ end
 
 local function head_view(state: State): Node
 	local spans: { Span | string } = { ui.span("Herd", "title") }
-	local meta = "   herdr-core · " .. (if state.run then "run " .. (state.run :: string) else "All terminals")
+	local meta = "   herdr-core"
+	if state.run then
+		meta ..= " · run " .. (state.run :: string)
+	end
 	if state.loading and not state.fetched then
 		meta ..= " · loading"
-	elseif state.fetched then
-		meta ..= " · updated " .. os.date("%H:%M:%S", state.fetched)
 	end
 	table.insert(spans, ui.span(meta, "muted"))
 	if state.subtree then
@@ -1396,18 +1423,18 @@ local function head_view(state: State): Node
 		})
 	end
 	local controls: { Node } = {
-		button("Run…", "scope", { icon = "tag", keys = { "u" }, title = "Switch run scope" }),
+		button("Scope…", "scope", { icon = "funnel", keys = { "u" }, title = "Switch run scope (U)" }),
 		ui.node("row", { key = "activity_control", gap = "xs", align = "center" }, {
-			toggle("Activity", "history", "activity", state.inbox, "v", "Observed activity inbox; opening does not mark read"),
+			toggle("Activity", "history", "activity", state.inbox, "v", "Observed activity inbox (V); opening does not mark read"),
 			ui.badge(tostring(state.unread), if state.unread > 0 then "accent" else "muted"),
 		}),
-		toggle("Finished", "history", "finished", state.finished, "h", "Show or hide finished terminal rows"),
-		toggle("Mute", "bell", "mute", state.muted, "m", "Mute status toasts"),
+		toggle("Show finished", "eye", "finished", state.finished, "h", "Show or hide finished terminal rows (H)"),
+		toggle("Mute toasts", "bell", "mute", state.muted, "m", "Mute status toasts (M)"),
 		button("Refresh", "refresh", {
 			icon = "repeat",
 			keys = { "r" },
-			busy = state.loading,
-			title = "Refresh now",
+			busy = state.loading and state.manual == true,
+			title = "Refresh now (R)",
 		}),
 	}
 	-- Let the window wrap at its actual sans width: cx.cols is terminal
@@ -1451,35 +1478,37 @@ local function stats_view(state: State, c: Counts): Node
 	local busy = busiest
 	local finished = if state.finished then c.finished or 0 else state.hidden
 
-	local items: { StatItem } = {
-		{
+	local items: { StatItem } = {}
+	if state.remotes > 0 or unreachable > 0 then
+		table.insert(items, {
 			label = "Machines",
 			value = tostring(1 + state.remotes),
 			tone = if unreachable > 0 then "warning" else nil,
-			sub = if unreachable > 0 then unreachable .. " unreachable"
-				elseif state.remotes > 0 then "all connected"
-				else "this one only",
+			sub = if unreachable > 0 then unreachable .. " unreachable" else "all connected",
 			title = "This machine plus the remote machines hc lists",
-		},
-		{
+		})
+	end
+	if worktrees > 0 then
+		table.insert(items, {
 			label = "Worktrees",
 			value = tostring(worktrees),
-			sub = if shared > 0 then shared .. " shared" elseif worktrees > 0 then "one per terminal" else nil,
 			title = "Distinct working directories of the listed terminals",
-		},
-		{
-			label = "Turns",
-			value = if counted > 0 then tostring(turns) else "–",
-			sub = if busy then "most " .. (busy.turn :: number) .. " · " .. short_of(busy) else "none report turns",
-			title = "hc's turn counters, summed over the listed terminals",
-		},
-		{
+		})
+	end
+	table.insert(items, {
+		label = "Turns",
+		value = if counted > 0 then tostring(turns) else "–",
+		sub = if busy then "most " .. (busy.turn :: number) .. " (" .. short_of(busy) .. ")" else nil,
+		title = "hc's turn counters, summed over the listed terminals",
+	})
+	if finished > 0 then
+		table.insert(items, {
 			label = "Finished",
 			value = tostring(finished),
-			sub = if state.finished then "listed · h hides" elseif finished > 0 then "hidden · h shows" else "none hidden",
+			sub = if state.finished then "listed" else "hidden",
 			title = "Finished terminals in the full observation; h only controls row visibility",
-		},
-	}
+		})
+	end
 	local node = ui.stats(items)
 	local p: { [string]: any } = node.p or {}
 	p.key = "stats"
@@ -1537,19 +1566,7 @@ local function empty_text(state: State): string
 	return "No terminals" .. under .. "."
 end
 
-local function description(state: State): string
-	local text = if state.filter == "needs"
-		then "Blocked or failed, waiting for you"
-		elseif state.filter == "working" then "In a turn now"
-		elseif state.filter == "done" then "Done, idle or finished"
-		else "Parents before their children"
-	local root = state.subtree
-	if root then
-		local t = state.by_addr[root]
-		text = "Under " .. (if t then short_of(t) else root) .. " · " .. text
-	end
-	return text .. " · " .. #state.rows .. " of " .. #(state.terms or {})
-end
+
 
 local function table_view(state: State, lay: Layout): Node
 	local terms = state.terms or {}
@@ -1656,11 +1673,24 @@ local function fixed(node: Node): Node
 	return node
 end
 
-local function toolbar_view(state: State): Node
-	local children: { Node } = { ui.node("text", { key = "about", spans = { ui.span(description(state), "muted") } }) }
+local function toolbar_view(state: State): Node?
+	local terms = state.terms or {}
+	local shown = #state.rows
+	local text: string? = nil
+	if state.subtree then
+		local root = state.by_addr[state.subtree :: string]
+		text = "Under " .. (if root then short_of(root) else state.subtree :: string) .. " · " .. shown .. " of " .. #terms
+	elseif state.filter ~= "all" then
+		text = shown .. " of " .. #terms .. " shown"
+	end
+	local children: { Node } = {}
+	if text then
+		table.insert(children, ui.node("text", { key = "about", spans = { ui.span(text :: string, "muted") } }))
+	end
 	if state.subtree then
 		table.insert(children, button("Clear focus", "clear_focus", { variant = "quiet", keys = { "esc" } }))
 	end
+	if #children == 0 then return nil end
 	return ui.node("row", { key = "bar", justify = "between", align = "center", gap = "md" }, children)
 end
 
@@ -1692,22 +1722,13 @@ local function detail_view(state: State, wide: boolean, cols: number): (Node, nu
 
 	local status: { Span | string } = {}
 	if s == "running" then
-		table.insert(status, ui.span("no status", "muted"))
-		table.insert(status, ui.span(" · a plain program", "muted"))
+		table.insert(status, ui.span("plain program", "muted"))
 	else
 		table.insert(status, ui.span(s, WORDS[s] or "muted"))
-		-- How long: hc's own `status_ms` (when it says the same word), else
-		-- the change this block saw; a first sight has neither.
 		if s ~= "finished" then
-			if info and info.status == s and info.status_since then
-				local age = dur(os.time() - (info.status_since :: number))
-				table.insert(status, ui.span(" · for " .. age .. " (from hc)", "muted"))
-			else
-				local since = since_of(state, term)
-				table.insert(status, ui.span(
-					if since then " · for " .. dur(os.time() - (since :: number)) .. " (seen by Herd)" else " · age unknown",
-					"muted"
-				))
+			local since = if info and info.status == s and info.status_since then info.status_since else since_of(state, term)
+			if since then
+				table.insert(status, ui.span(" · for " .. dur(os.time() - (since :: number)), "muted"))
 			end
 		end
 		if info and info.status_kind and s == "blocked" then
@@ -1746,7 +1767,9 @@ local function detail_view(state: State, wide: boolean, cols: number): (Node, nu
 		agent = spans
 	end
 	table.insert(items, fact("Agent", agent))
-	table.insert(items, fact("Model", ui.span(if info and info.model then info.model else "—", if info and info.model then "mono" else "muted")))
+	if info and info.model then
+		table.insert(items, fact("Model", ui.span(info.model :: string, "mono")))
+	end
 	table.insert(items, fact("Turn", ui.span(if term.turn then tostring(term.turn) else "–", "mono")))
 	table.insert(items, fact("Started", later(if info and info.created then ago(info.created :: number) else nil, "unknown")))
 	if term.state ~= "live" or (info and info.state ~= "live") then
@@ -1769,7 +1792,9 @@ local function detail_view(state: State, wide: boolean, cols: number): (Node, nu
 		table.insert(items, fact("Exit", spans))
 	end
 	table.insert(items, fact("Parent", parent))
-	table.insert(items, fact("Children", if children > 0 then ui.span(tostring(children), "mono") else ui.span("none", "muted")))
+	if children > 0 then
+		table.insert(items, fact("Children", ui.span(tostring(children), "mono")))
+	end
 	local cwd = tilde(term.cwd)
 	-- One line when the whole path fits the value column; otherwise break
 	-- before the distinctive leaf so it isn't split at the card's edge. A
@@ -1787,7 +1812,7 @@ local function detail_view(state: State, wide: boolean, cols: number): (Node, nu
 
 	local body: { Node } = {}
 	table.insert(body, ui.node("row", { key = "end", gap = "sm" }, {
-		button("Watch", "watch", { variant = "primary", size = "sm", icon = "eye", keys = { "enter" } }),
+		button("Watch", "watch", { variant = "primary", size = "sm", icon = "eye", keys = { "enter" }, title = "Open a read-only viewer (Enter)" }),
 	}))
 	local facts = #items + (if string.find(cwd_lines, "\n", 1, true) then 1 else 0)
 	if info and info.status_msg then
@@ -1839,15 +1864,15 @@ local function detail_view(state: State, wide: boolean, cols: number): (Node, nu
 		table.insert(viewer_buttons, button("Park Watch", "park", { size = "sm", keys = { "z" }, title = "Hide the read-only viewer without stopping its terminal" }))
 	end
 	local safe_rows: { Node } = {
-			ui.node("row", { key = "use", gap = "sm", wrap = true }, {
-				button("Attach", "attach", { size = "sm", keys = { "a" } }),
-				button("Logs", "logs", { size = "sm", keys = { "l" } }),
-				button("Send…", "send", { size = "sm", keys = { "s" }, disabled = if term.state == "live" then nil else "It has finished" }),
-			}),
-			ui.node("row", { key = "go", gap = "sm", wrap = true }, {
-				button("Worktree", "worktree", { size = "sm", keys = { "w" }, disabled = why_not_tree }),
-				button("Focus", "focus", { size = "sm", keys = { "f" }, on = state.subtree == term.address }),
-			}),
+		ui.node("row", { key = "use", gap = "sm", wrap = true }, {
+			button("Attach", "attach", { size = "sm", keys = { "a" }, title = "Open an interactive attach pane" }),
+			button("Logs", "logs", { size = "sm", keys = { "l" }, title = "Read the last 40 lines once" }),
+			button("Send…", "send", { size = "sm", keys = { "s" }, title = "Send a prompt with hc send", disabled = if term.state == "live" then nil else "It has finished" }),
+		}),
+		ui.node("row", { key = "go", gap = "sm", wrap = true }, {
+			button("Worktree", "worktree", { size = "sm", keys = { "w" }, title = "Open this worktree in a Git block", disabled = why_not_tree }),
+			button("Focus subtree", "focus", { size = "sm", keys = { "f" }, title = "Show only this terminal and its children", on = state.subtree == term.address, disabled = if children == 0 and state.subtree ~= term.address then "No child terminals" else nil }),
+		}),
 	}
 	if #viewer_buttons > 0 then
 		table.insert(safe_rows, ui.node("row", { key = "viewer", gap = "sm", wrap = true }, viewer_buttons))
@@ -1923,18 +1948,28 @@ end
 -- the same remaining-height region as the terminal table.
 local function activity_view(state: State): Node
 	local scope = if state.run then "run " .. (state.run :: string) else "All terminals"
+	local actions: Node
+	if state.clear_armed then
+		actions = ui.node("row", { key = "actions", gap = "sm", wrap = true }, {
+			ui.text(ui.span("Clear this scope's activity?", "warning")),
+			button("Cancel", "activity_clear_cancel", { variant = "quiet", keys = { "esc" } }),
+			button("Clear activity", "activity_clear", { variant = "danger", keys = { "enter" } }),
+		})
+	else
+		actions = ui.node("row", { key = "actions", gap = "sm", wrap = true }, {
+			button("Mark read", "activity_read", { variant = "quiet", disabled = state.unread == 0,
+				title = "Mark this scope's retained activity read in every console" }),
+			button("Clear…", "activity_clear", { variant = "danger", disabled = #state.activity == 0,
+				title = "Remove this scope's retained events from shared history; keep transition baselines" }),
+			button("Back", "activity_back", { variant = "quiet", keys = { "esc" } }),
+		})
+	end
 	local children: { Node } = {
 		ui.node("row", { key = "toolbar", justify = "between", align = "center", gap = "sm", wrap = true }, {
 			ui.text({ ui.span("Activity", "strong"), ui.span(" · " .. scope .. " · " .. state.unread .. " unread", "muted") }),
-			ui.node("row", { key = "actions", gap = "sm", wrap = true }, {
-				button("Mark read", "activity_read", { variant = "quiet", disabled = state.unread == 0,
-					title = "Mark this scope's retained activity read in every console" }),
-				button("Clear", "activity_clear", { variant = "quiet", disabled = #state.activity == 0,
-					title = "Remove this scope's retained events from shared history; keep transition baselines" }),
-				button("Back", "activity_back", { variant = "quiet", keys = { "esc" } }),
-			}),
+			actions,
 		}),
-		ui.text(ui.span("Observed history, not a complete audit. Newest first; opening does not mark read.", "muted")),
+		ui.text(ui.span("Newest first. Opening does not mark read.", "muted")),
 	}
 	if state.activity_problem then
 		table.insert(children, ui.text(ui.span(state.activity_problem :: string, "warning")))
@@ -1943,12 +1978,15 @@ local function activity_view(state: State): Node
 	for _, event in state.activity do
 		local status = event.status .. (if event.exit_code ~= nil then " · exit " .. event.exit_code else "")
 		local name = if event.name then event.name .. " (" .. event.address .. ")" else event.address
+		local meta: { Node } = {
+			ui.text(ui.span(os.date("%Y-%m-%d %H:%M:%S", event.at), "muted mono")),
+			ui.text(ui.span(status, WORDS[event.status] or "muted")),
+		}
+		if not event.read then
+			table.insert(meta, ui.badge("unread", "accent"))
+		end
 		table.insert(rows, ui.node("col", { key = "event_" .. event.id, role = "herd.activity.event", gap = "xs" }, {
-			ui.node("row", { key = "meta", gap = "sm", align = "center", wrap = true }, {
-				ui.text(ui.span(os.date("%Y-%m-%d %H:%M:%S", event.at), "muted mono")),
-				ui.text(ui.span(status, WORDS[event.status] or "muted")),
-				ui.badge(if event.read then "read" else "unread", if event.read then "muted" else "accent"),
-			}),
+			ui.node("row", { key = "meta", gap = "sm", align = "center", wrap = true }, meta),
 			ui.text(ui.span(name, if event.read then "muted" else "strong")),
 		}))
 	end
@@ -1956,7 +1994,7 @@ local function activity_view(state: State): Node
 		table.insert(children, ui.node("empty", { key = "empty", variant = "inline", frame = true,
 			icon = "history", title = if state.activity_problem then "Activity unavailable" else "No observed activity",
 			text = if state.activity_problem then "Refresh to retry reading history."
-				else "Transitions observed while a console polls will appear here. A run includes only known scope associations." }))
+				else "Transitions appear while a console is open." }))
 	else
 		table.insert(children, ui.node("scroll", { key = "entries", grow = 1, basis = 0,
 			min = { h = "6lines" }, noun = "event" }, {
@@ -1995,13 +2033,11 @@ end
 local LEGEND: { { string } } = {
 	{ "↑↓", "select" },
 	{ "home/end", "jump" },
-	{ "enter", "watch" },
 	{ "1–4 tab", "filter" },
 	{ "[/]", "needs you" },
 }
 local LEGEND_SHORT: { { string } } = {
 	{ "↑↓", "select" },
-	{ "enter", "watch" },
 	{ "tab", "filter" },
 	{ "[/]", "needs" },
 }
@@ -2088,12 +2124,15 @@ local function enqueue_window(state: State, verb: string, address: string, label
 		return nil
 	end
 	request_serial += 1
+	local term = state.by_addr[address]
+	local read = verb == "watch" or verb == "float" or verb == "dock" or verb == "park"
 	local request: common.WindowRequest = {
 		id = tostring(tern.now()) .. ":" .. request_serial,
 		verb = verb, address = address, label = label,
 		hc = hc_path or "hc", expires = tern.now() + 5000,
 		mode = if verb == "attach" then "write"
-			elseif verb == "watch" or verb == "float" or verb == "dock" or verb == "park" then "read" else nil,
+			elseif read then "read" else nil,
+		agent = if read and term and agent_like(term) then true else nil,
 		generation = state.scope_epoch,
 		selection = state.artifact.epoch,
 		viewer_owner = if verb == "watch" or verb == "float" or verb == "dock" or verb == "park" then state.viewer_owner else nil,
@@ -2366,19 +2405,28 @@ local function on_action(state: State, cx: BlockCx, act_name: string, value: str
 		return
 	end
 	if act_name == "retry" or act_name == "refresh" then
-		refresh(state)
+		refresh(state, true)
 		sync_activity()
 	elseif act_name == "activity" then
 		state.inbox = not state.inbox
+		state.clear_armed = nil
 		sync_activity()
 	elseif act_name == "activity_back" then
 		state.inbox = false
+		state.clear_armed = nil
 	elseif act_name == "activity_read" then
 		activity.mark_read(state.run)
 		sync_activity()
 	elseif act_name == "activity_clear" then
-		activity.clear(state.run)
-		sync_activity()
+		if state.clear_armed then
+			state.clear_armed = nil
+			activity.clear(state.run)
+			sync_activity()
+		else
+			state.clear_armed = true
+		end
+	elseif act_name == "activity_clear_cancel" then
+		state.clear_armed = nil
 	elseif act_name == "scope" then
 		ask_window(state, cx, "scope")
 	elseif act_name == "herd_scope" and value then
@@ -2525,19 +2573,8 @@ tern.block.define("herd", {
 		return state
 	end,
 
-	title = function(state: State): string?
-		local c = counts(state)
-		local parts: { string } = {}
-		if c.working then
-			table.insert(parts, c.working .. " working")
-		end
-		local needs = (c.blocked or 0) + (c.error or 0)
-		if needs > 0 then
-			table.insert(parts, needs .. " need you")
-		end
-		if state.unread > 0 then table.insert(parts, state.unread .. " unread") end
-		local title = if state.run then "Herd · " .. (state.run :: string) else "Herd · All terminals"
-		return if #parts > 0 then title .. " · " .. table.concat(parts, " · ") else title
+	title = function(_state: State): string?
+		return "Herd"
 	end,
 
 	view = function(state: State, cx: BlockCx): BlockView
@@ -2564,6 +2601,10 @@ tern.block.define("herd", {
 			-- The list's natural height: the toolbar's line and the gap under
 			-- it are one row's worth, then the header and the rows.
 			local natural = table_h(n + 1)
+			local list_children: { Node } = {}
+			local toolbar = toolbar_view(state)
+			if toolbar then table.insert(list_children, fixed(toolbar)) end
+			table.insert(list_children, table_box(state, lay, floor ~= nil))
 			local list = ui.node("col", {
 				key = "list",
 				gap = "sm",
@@ -2571,10 +2612,7 @@ tern.block.define("herd", {
 				basis = if wide or floor then 0 else "content",
 				min = if floor and not wide then { h = floor .. "lines" } else nil,
 				max = if floor and not wide then { h = natural .. "lines" } else nil,
-			}, {
-				fixed(toolbar_view(state)),
-				table_box(state, lay, floor ~= nil),
-			})
+			}, list_children)
 			local card, card_lines = detail_view(state, wide, cx.cols)
 			if wide then
 				-- The card's content is the floor of the shared row, not a
@@ -2589,8 +2627,10 @@ tern.block.define("herd", {
 					min = if floor then { h = math.max(floor, card_h) .. "lines" } else nil,
 				}, { list, card }))
 			else
-				table.insert(main, list)
+				-- Keep the selected terminal's facts and actions above the list
+				-- in narrow panes, where the list would push them off screen.
 				table.insert(main, fixed(card))
+				table.insert(main, list)
 			end
 			if state.logs then
 				table.insert(main, fixed(logs_view(state, state.logs :: Logs)))
@@ -2679,12 +2719,13 @@ tern.block.define("herd", {
 		elseif k == "u" then
 			ask_window(state, cx, "scope")
 		elseif k == "r" then
-			refresh(state)
+			refresh(state, true)
 			sync_activity()
 		elseif key.name == "escape" then
 			-- Back out one layer: inbox, logs, then focus.
 			if state.inbox then
 				state.inbox = false
+				state.clear_armed = nil
 			elseif state.logs then
 				state.logs = nil
 			elseif state.subtree then
