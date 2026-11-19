@@ -43,7 +43,7 @@ stop an agent.
   on PATH alone is insufficient: split panes get the login environment.
 - **Keep executable resolution in one place.** `M.HC` is defined only in `common.luau`, which
   ends with a module-level `return M`; the harness inserts its fake candidate before that return.
-  Resolve by name, `$HOME/.local/bin/hc`, `/usr/local/bin/hc`, `/usr/bin/hc`; never hardcode a user.
+  Resolve by name, `%LOCALAPPDATA%\Programs\herdr-core\hc.exe` on Windows, `$HOME/.local/bin/hc`, `/usr/local/bin/hc`, `/usr/bin/hc`; never hardcode a user.
 - **No personal data in the repo.** No real home paths, hostnames, work sessions, customer/project
   names, credentials or terminal output in code, fixtures, docs or screenshots. Fixtures use
   `/home/alex`, repo `shop`, builders such as `b1-cart` and `b2-checkout`, and machine `build-box`.

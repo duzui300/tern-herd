@@ -39,7 +39,6 @@ local NOTICE_S = 20
 local DETAIL_DEBOUNCE_MS = 200
 local DETAIL_MAX_AGE_MS = 10 * 1000
 local ARTIFACT_MAX_AGE_MS = 30 * 1000
-local HOME = tern.getenv("HOME")
 
 -- Layout, in cells. The table's columns are sized from the rows it shows
 -- (widest cell plus padding), so the choice below is what the table can
@@ -51,7 +50,7 @@ local HOME = tern.getenv("HOME")
 local CARD_CH = 48
 local CARD_MIN_CH = 40
 local VIEW_GAP = 2
-local PAGE_PAD = 4
+local PAGE_PAD = 6
 local COL_PAD = 2
 local LEAF_MAX = 24
 local NARROW_COLS = 72
@@ -329,28 +328,8 @@ local function last_lines(text: string, n: number): string
 	return table.concat(lines, "\n", from, #lines)
 end
 
-local function tilde(path: string): string
-	if HOME and HOME ~= "" then
-		if path == HOME then
-			return "~"
-		end
-		if string.sub(path, 1, #HOME + 1) == HOME .. "/" then
-			return "~" .. string.sub(path, #HOME + 1)
-		end
-	end
-	return path
-end
-
--- The last segment of a working directory: the worktree's name.
-local function leaf(cwd: string): string
-	if cwd == "" then
-		return ""
-	end
-	if HOME and cwd == HOME then
-		return "~"
-	end
-	return string.match(cwd, "([^/]+)/*$") or cwd
-end
+local tilde = common.tilde
+local leaf = common.leaf
 
 local function width(s: string): number
 	return utf8.len(s) or #s
@@ -805,12 +784,12 @@ local function next_needs(state: State, step: number): boolean
 			rebuild(state)
 			set_notice(state, "Selected " .. label_of(row.t) .. (if stale
 				then " from the cached list; it may be out of date."
-				else " — needs you."), if stale then "warning" else "muted")
+				else " — needs you."), if stale then "warning" else "info")
 			return true
 		end
 	end
 	set_notice(state, "No blocked or errored terminals in this scope" .. (if stale
-		then " in the cached list; it may be out of date." else "."), if stale then "warning" else "muted")
+		then " in the cached list; it may be out of date." else "."), if stale then "warning" else "info")
 	return false
 end
 
@@ -1185,6 +1164,9 @@ local AGENT_ICONS: { [string]: string } = {
 	omp = "app-omp",
 	claude = "app-claude",
 	pi = "pi-mark",
+	antigravity = "provider-google",
+	agy = "provider-google",
+	opencode = "code",
 	python = "app-python",
 	python3 = "app-python",
 	node = "app-node",
@@ -1199,6 +1181,12 @@ local AGENT_ICONS: { [string]: string } = {
 	bash = "terminal",
 	sh = "terminal",
 	fish = "terminal",
+	powershell = "terminal",
+	["powershell.exe"] = "terminal",
+	pwsh = "terminal",
+	["pwsh.exe"] = "terminal",
+	cmd = "terminal",
+	["cmd.exe"] = "terminal",
 }
 
 local function button(label: string, action: string, props: { [string]: any }?): Node
@@ -1424,7 +1412,7 @@ local function head_view(state: State): Node
 	}
 	-- Let the window wrap at its actual sans width: cx.cols is terminal
 	-- geometry and can describe a much wider pane on another client.
-	return ui.node("row", { key = "head", justify = "between", align = "center", gap = "md", wrap = true }, {
+	return ui.node("row", { key = "head", role = "herd.head", justify = "between", align = "center", gap = "md", wrap = true }, {
 		ui.node("text", { key = "title", spans = spans, basis = "content", max = { w = 1 } }),
 		ui.node("row", { key = "end", gap = "sm", align = "center", wrap = true,
 			basis = "content", max = { w = 1 } }, controls),
@@ -1495,24 +1483,29 @@ local function stats_view(state: State, c: Counts): Node
 	local node = ui.stats(items)
 	local p: { [string]: any } = node.p or {}
 	p.key = "stats"
-	p.role = "herd.stats"
+	p.role = if state.cx.cols < 48 then "herd.stats-compact" else "herd.stats"
 	node.p = p
 	return node
 end
 
 local function tabs_view(state: State, c: Counts): Node
 	local items = {}
+	local terms: { Term } = state.terms or {}
+	local tab_counts: { [string]: number } = {
+		all = #terms,
+		needs = (c.blocked or 0) + (c.error or 0),
+		working = c.working or 0,
+		done = (c.done or 0) + (c.idle or 0) + (c.finished or 0),
+	}
 	for _, id in FILTERS do
 		local label: { Span | string } = { ui.span(FILTER_LABEL[id]) }
-		if id == "needs" then
-			local n = (c.blocked or 0) + (c.error or 0)
-			if n > 0 then
-				table.insert(label, ui.span(" " .. n, "muted"))
-			end
+		local n = tab_counts[id] or 0
+		if n > 0 and (id ~= "all" or #terms > 0) then
+			table.insert(label, ui.span(" " .. n, if id == "needs" then "warning" else "muted"))
 		end
 		table.insert(items, { id = id, label = label })
 	end
-	return ui.node("tabs", { key = "filter", active = state.filter, items = items })
+	return ui.node("tabs", { key = "filter", role = "herd.tabs", active = state.filter, items = items })
 end
 
 -- One warning card per machine hc can't reach, with hc's reason.
@@ -1680,7 +1673,7 @@ end
 -- facts, a line per fact and one per extra line a fact or an error breaks
 -- onto. Beside the table it is the floor of the row the two share.
 local function detail_view(state: State, wide: boolean, cols: number): (Node, number)
-	local size: { [string]: any } = { key = "detail" }
+	local size: { [string]: any } = { key = "detail", role = "herd.detail" }
 	if wide then
 		size.min = { w = CARD_MIN_CH .. "ch" }
 		size.max = { w = CARD_CH .. "ch" }
@@ -1782,8 +1775,8 @@ local function detail_view(state: State, wide: boolean, cols: number): (Node, nu
 	-- before the distinctive leaf so it isn't split at the card's edge. A
 	-- card with a long path grows to CARD_CH beside the table.
 	local value_ch = math.max(1, (if wide then CARD_CH else cols - PAGE_PAD) - CARD_INSET_CH - KV_KEY_CH - KV_GAP_CH)
-	local directory, leaf_name = string.match(cwd, "^(.*)/([^/]+)$")
-	local cwd_lines = if directory and leaf_name and width(cwd) > value_ch then directory .. "/\n" .. leaf_name else cwd
+	local directory, leaf_name = common.split_parent_leaf(cwd)
+	local cwd_lines = if directory and leaf_name and width(cwd) > value_ch then directory .. "\n" .. leaf_name else cwd
 	table.insert(items, fact("Worktree", if cwd_lines ~= "" then ui.span(cwd_lines, "mono") else ui.span("unknown", "muted")))
 	if term.where ~= "" then
 		table.insert(items, fact("Where", term.where))
@@ -1862,7 +1855,7 @@ local function detail_view(state: State, wide: boolean, cols: number): (Node, nu
 	if #artifact_buttons > 0 then
 		table.insert(safe_rows, ui.node("row", { key = "artifacts", gap = "sm", wrap = true }, artifact_buttons))
 	end
-	table.insert(body, ui.node("col", { key = "actions", gap = "md" }, {
+	table.insert(body, ui.node("col", { key = "actions", role = "herd.actions", gap = "md" }, {
 		ui.node("col", { key = "safe", gap = "sm" }, safe_rows),
 		ui.node("row", { key = "danger", gap = "sm", justify = "end" }, {
 			button("Interrupt…", "interrupt", {
@@ -1887,11 +1880,12 @@ local function detail_view(state: State, wide: boolean, cols: number): (Node, nu
 end
 
 local function logs_view(state: State, logs: Logs): Node
-	local meta: { Span | string } = { ui.span("last " .. READ_LINES .. " lines", "muted") }
+	local narrow_logs = state.cx.cols < NARROW_COLS
+	local meta: { Span | string } = { ui.span(if narrow_logs then READ_LINES .. " lines" else "last " .. READ_LINES .. " lines", "muted") }
 	if logs.loading then
-		table.insert(meta, ui.span(" · reading…", "muted"))
+		table.insert(meta, ui.span(if narrow_logs then " · …" else " · reading…", "muted"))
 	elseif logs.at then
-		table.insert(meta, ui.span(" · read " .. os.date("%H:%M:%S", logs.at), "muted"))
+		table.insert(meta, ui.span((if narrow_logs then " · " else " · read ") .. os.date("%H:%M:%S", logs.at), "muted"))
 	end
 	if not state.by_addr[logs.address] then
 		table.insert(meta, ui.span(" · gone from hc ls", "warning"))
@@ -1909,7 +1903,7 @@ local function logs_view(state: State, logs: Logs): Node
 		-- The newest lines matter most: a box half the pane tall that starts
 		-- at the end and scrolls up through the rest.
 		local fit = math.clamp(math.floor(state.cx.rows / 2), MIN_LOG_LINES, READ_LINES)
-		table.insert(body, ui.node("scroll", { key = "out", stick = "end", noun = "line", max = { h = fit .. "lines" } }, {
+		table.insert(body, ui.node("scroll", { key = "out", role = "herd.logbox", stick = "end", noun = "line", max = { h = fit .. "lines" } }, {
 			ui.ansi(logs.text :: string),
 		}))
 	elseif logs.loading then
@@ -1917,6 +1911,7 @@ local function logs_view(state: State, logs: Logs): Node
 	end
 	return ui.card({ ui.span(logs.label, "strong") }, body, {
 		key = "logs",
+		role = "herd.logs",
 		icon = "terminal",
 		meta = meta,
 		["end"] = "main.page.logs.end",
@@ -1975,7 +1970,7 @@ end
 local function problem_view(problem: Problem): Node
 	local help = if problem.kind == "missing"
 		then "The Herd block runs `hc ls --json --all` on the machine that runs your panes. Install herdr-core there "
-			.. "(`hc` in ~/.local/bin, /usr/local/bin or /usr/bin), then press **r**."
+			.. "(`hc` on `PATH`, `%LOCALAPPDATA%\\Programs\\herdr-core\\hc.exe`, `~/.local/bin`, `/usr/local/bin` or `/usr/bin`), then press **r**."
 		elseif string.find(problem.text, "server status", 1, true) then "Press **r** to try again."
 		else "`hc server status` says whether herdr-core is running. Press **r** to try again."
 	local children: { Node } = {
@@ -2035,7 +2030,7 @@ local function dock_view(state: State, compact: boolean): Node
 		}))
 	end
 	if not state.inbox then table.insert(lines, legend(compact)) end
-	return ui.col({ ui.lines(lines) })
+	return ui.node("col", { role = "herd.dock" }, { ui.lines(lines) })
 end
 
 local function move(state: State, to: number)
@@ -2161,7 +2156,7 @@ schedule_artifacts = function(state: State, force: boolean?)
 		elseif is_remote(terminal.address) then
 			entry.loading = false
 			entry.error = "Artifacts open for local hc terminals only."
-		elseif string.sub(terminal.cwd, 1, 1) ~= "/" then
+		elseif not common.is_absolute(terminal.cwd) then
 			entry.loading = false
 			entry.error = "hc reports no absolute working directory for local artifacts."
 		else

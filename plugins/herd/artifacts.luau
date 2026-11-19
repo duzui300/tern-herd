@@ -1,6 +1,8 @@
 --!strict
 -- Shared relative preferences; discovery is host-only. The scan caller owns
--- selection, cadence and callback liveness. GNU find paths remain inert argv.
+-- selection, cadence and callback liveness. GNU find / PowerShell paths remain inert.
+
+local common = require("./common")
 
 local M = {}
 
@@ -116,11 +118,15 @@ local function missing(specs: { Spec }): { Match }
 	return matches
 end
 
-local function join(directory: string, basename: string): string
-	return directory .. (if directory == "/" then "" else "/") .. basename
+local function join(directory: string, basename: string, sep: string?): string
+	local s = sep or "/"
+	if directory == "/" or string.sub(directory, -1) == "/" or string.sub(directory, -1) == "\\" then
+		return directory .. basename
+	end
+	return directory .. s .. basename
 end
 
-local function target(cwd: string, path: string): Target
+local function target(cwd: string, path: string, sep: string): Target
 	local segments: { string } = {}
 	-- Removing empty and '.' segments preserves relative path meaning.
 	for segment in string.gmatch(path, "[^/]+") do
@@ -130,7 +136,7 @@ local function target(cwd: string, path: string): Target
 	local directory = cwd
 	local parents = { cwd }
 	for _, segment in segments do
-		directory = join(directory, segment)
+		directory = join(directory, segment, sep)
 		table.insert(parents, directory)
 	end
 	return { directory = directory, basename = basename, parents = parents }
@@ -217,18 +223,123 @@ local function parse(stdout: string, specs: { Spec }, targets: { Target }): ({ M
 	return matches, nil
 end
 
+local WIN_SCAN_SCRIPT = table.concat({
+	"[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false);",
+	"$q = $env:HERD_ARTIFACT_QUERY | ConvertFrom-Json;",
+	"$out = @();",
+	"foreach ($item in $q.items) {",
+	"  $skip = $false;",
+	"  foreach ($p in $item.parents) {",
+	"    if (-not [System.IO.Directory]::Exists($p)) { $skip = $true; break }",
+	"    $di = [System.IO.DirectoryInfo]::new($p);",
+	"    if ($di.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { $skip = $true; break }",
+	"  }",
+	"  if ($skip) { continue }",
+	"  $dirInfo = [System.IO.DirectoryInfo]::new($item.directory);",
+	"  $best = $null;",
+	"  foreach ($f in $dirInfo.EnumerateFiles($item.basename)) {",
+	"    if ($f.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }",
+	"    $t = $f.LastWriteTimeUtc.Ticks;",
+	"    if ($null -eq $best -or $t -gt $best.ticks -or ($t -eq $best.ticks -and $f.FullName -lt $best.path)) {",
+	"      $best = @{ ticks = $t; path = $f.FullName }",
+	"    }",
+	"  }",
+	"  if ($null -ne $best) { $out += @{ index = [int]$item.index; path = $best.path } }",
+	"}",
+	"@{ matches = @($out) } | ConvertTo-Json -Compress",
+}, " ")
+
+local function scan_windows(
+	cwd: string,
+	specs: { Spec },
+	targets: { Target },
+	parents: { [string]: boolean },
+	done: ({ Match }, string?) -> ()
+): ()
+	local absent = missing(specs)
+	local query_items: { { index: number, directory: string, basename: string, parents: { string } } } = {}
+	for index, item in targets do
+		if parents[item.directory] then
+			local list_ok, entries = pcall(tern.fs.list, item.directory)
+			if list_ok and type(entries) == "table" then
+				local any_match = false
+				for _, entry in entries do
+					if type(entry) == "string" and glob(entry, item.basename) then
+						any_match = true
+						break
+					end
+				end
+				if any_match then
+					table.insert(query_items, {
+						index = index,
+						directory = item.directory,
+						basename = item.basename,
+						parents = item.parents,
+					})
+				end
+			end
+		end
+	end
+	if #query_items == 0 then
+		done(absent, nil)
+		return
+	end
+	local completed = false
+	local function finish(matches: { Match }, err: string?)
+		if completed then return end
+		completed = true
+		done(matches, err)
+	end
+	local payload = tern.json.encode({ items = query_items })
+	local argv = { "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", WIN_SCAN_SCRIPT }
+	local ok = pcall(function()
+		tern.process.run(argv, { timeout_ms = 3000, env = { HERD_ARTIFACT_QUERY = payload } }, function(result: ProcessResult, _)
+			if result.timed_out then
+				finish(absent, "Artifact scan timed out after 3 s")
+			elseif result.status ~= 0 then
+				finish(absent, "Artifact scan unavailable (exit " .. tostring(result.status) .. ")")
+			else
+				local dec_ok, data = pcall(tern.json.decode, result.stdout)
+				if not dec_ok or type(data) ~= "table" or type(data.matches) ~= "table" then
+					finish(absent, "Artifact scan returned invalid JSON")
+					return
+				end
+				local matches = missing(specs)
+				for _, row in data.matches do
+					if type(row) == "table" and type(row.index) == "number" and type(row.path) == "string" then
+						local idx = row.index
+						if matches[idx] then
+							matches[idx].path = row.path
+						end
+					end
+				end
+				finish(matches, nil)
+			end
+		end)
+	end)
+	if not ok then finish(absent, "Artifact scan unavailable: could not start PowerShell") end
+end
+
 function M.scan(cwd: string, input: { Spec }, done: ({ Match }, string?) -> ()): ()
 	local specs, invalid = validate(input)
 	if not specs then done({}, invalid); return end
 	local absent = missing(specs)
-	if string.sub(cwd, 1, 1) ~= "/" or string.find(cwd, "\0", 1, true) then
+	if not common.is_absolute(cwd) or string.find(cwd, "\0", 1, true) then
 		done(absent, "Artifact scan needs an absolute cwd")
 		return
 	end
-	-- Keep the supplied cwd's internal components: resolving '..' lexically
-	-- would change its meaning when an earlier component is a symlink.
-	cwd = string.gsub(cwd, "/+$", "")
-	if cwd == "" then cwd = "/" end
+	local win = common.is_windows_path(cwd)
+	local sep = if win then "\\" else "/"
+	if win then
+		cwd = string.gsub(cwd, "/", "\\")
+		cwd = string.gsub(cwd, "\\+$", "")
+		if string.match(cwd, "^%a:$") then cwd ..= "\\" end
+	else
+		-- Keep the supplied cwd's internal components: resolving '..' lexically
+		-- would change its meaning when an earlier component is a symlink.
+		cwd = string.gsub(cwd, "/+$", "")
+		if cwd == "" then cwd = "/" end
+	end
 	local targets: { Target } = {}
 	local parents: { [string]: boolean } = {}
 	local allowed = { cwd }
@@ -237,7 +348,7 @@ function M.scan(cwd: string, input: { Spec }, done: ({ Match }, string?) -> ()):
 	local seen_patterns: { [string]: boolean } = {}
 	local maxdepth = 1
 	for _, spec in specs do
-		local item = target(cwd, spec.path)
+		local item = target(cwd, spec.path, sep)
 		table.insert(targets, item)
 		if parents[item.directory] == nil then
 			local ok, exists = pcall(tern.fs.exists, item.directory)
@@ -252,7 +363,7 @@ function M.scan(cwd: string, input: { Spec }, done: ({ Match }, string?) -> ()):
 				end
 			end
 		end
-		if parents[item.directory] then
+		if parents[item.directory] and not win then
 			maxdepth = math.max(maxdepth, #item.parents)
 			local pattern = join(literal_path(item.directory), item.basename)
 			if not seen_patterns[pattern] then
@@ -260,6 +371,10 @@ function M.scan(cwd: string, input: { Spec }, done: ({ Match }, string?) -> ()):
 				table.insert(file_patterns, pattern)
 			end
 		end
+	end
+	if win then
+		scan_windows(cwd, specs, targets, parents, done)
+		return
 	end
 	if #file_patterns == 0 then done(absent, nil); return end
 

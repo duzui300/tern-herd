@@ -47,7 +47,7 @@ These show made-up data from the isolated test harness, never a real work sessio
 
 - **Tern 0.9.12 or later (tested on 0.9.12)**. Tern is closed beta and requires a Stencil account.
 - **herdr-core `hc` 0.1.18 or later**, available from [herdr.dev](https://herdr.dev). The Herdr desktop app is not required.
-- Linux is tested. **macOS is untested**; use ⌘⌥⇧H to open and ⌘⌥⇧J / ⌘⌥⇧U for next / previous needs-you.
+- Linux and Windows are tested. **macOS is untested**; use ⌘⌥⇧H to open and ⌘⌥⇧J / ⌘⌥⇧Y for next / previous needs-you.
 - For development and screenshots: Bash, Git, `jq`, standard GNU command-line tools and a working Tern graphics environment. `shellcheck` is optional.
 
 ## Install
@@ -85,7 +85,7 @@ replica cannot erase those controls. If its reporter disappears, the bounded
 lease expires and another capable replica can take over.
 
 Choose **Next Herd terminal that needs you** / **Previous Herd terminal that needs you**
-in the palette, or press **Ctrl+Alt+Shift+J** / **Ctrl+Alt+Shift+U** from any tab.
+in the palette, or press **Ctrl+Alt+Shift+J** / **Ctrl+Alt+Shift+Y** from any tab.
 These focus (or unpark/open) the current session's console and cycle blocked/errored
 terminals in its saved run scope, wrapping in full tree order. They only select:
 no watch, attach or send happens automatically. With multiple consoles, the focused
@@ -97,8 +97,8 @@ Choose **Configure Herd artifacts**
 (`plugin.herd.artifacts`) to edit global relative-path specs without opening a
 console; `[]` disables the links. Defaults are `.scratch/report.md`,
 `.scratch/review-*.md`
-(newest actual modification time), and `.scratch/brief.md`. Linux with GNU
-`find` is supported; remote hc terminals and remote/unknown Tern source hosts
+(newest actual modification time), and `.scratch/brief.md`. Linux (GNU `find`)
+and Windows (`tern.fs` pre-check with PowerShell `LastWriteTimeUtc`) are supported; remote hc terminals and remote/unknown Tern source hosts
 are refused rather than interpreting their paths on this machine. See the
 [artifact guide](plugins/herd/README.md#local-artifacts) for configuration and limits.
 
@@ -129,7 +129,7 @@ change observed between polls, or `age unknown` when neither source is available
 ## How it works
 
 The daemon half polls `hc ls --json --all` every two seconds and builds the terminal tree.
-It looks for `hc` on PATH, then in `$HOME/.local/bin`, `/usr/local/bin` and `/usr/bin`.
+It looks for `hc` on PATH, then in `%LOCALAPPDATA%\Programs\herdr-core\hc.exe` on Windows, `$HOME/.local/bin`, `/usr/local/bin` and `/usr/bin`.
 Only the selected terminal gets an `hc get` request; logs are read only when asked.
 The block posts each action request where only window halves with the plugin can see it.
 Exactly one of them claims it and opens the split, git block or dialog; no link goes to another client, so nothing reaches a system browser.

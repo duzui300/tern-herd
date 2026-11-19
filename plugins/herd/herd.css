@@ -1,19 +1,39 @@
-/* A region root is not a col. Give its real child a definite window-sized
-   flex box; native flex then measures chrome/cards before sizing the list. */
+/* Console root surface & scrollable page container with balanced spacing. */
+.sf-main[data-role='herd.console'] {
+  background: var(--panel);
+}
+
 .sf-main[data-role='herd.console'] > .sf-col[data-role='herd.page'] {
   position: absolute;
   inset: 0;
   overflow-y: auto;
+  padding: 10px 16px;
+  gap: 8px;
 }
 
-/* Four equal tiles stay on one line at the real container width. Remove
-   the stock 14ch minimum, which otherwise yields an accidental 3+1 wrap. */
-.sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats'] {
-  flex-wrap: nowrap;
+/* Header separation hairline. */
+.sf-main[data-role='herd.console'] [data-role='herd.head'] {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--l1);
+}
+
+/* Summary tiles in a recessed well container (1x4 normally, 2x2 when ultra-narrow). */
+.sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats'],
+.sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats-compact'] {
+  box-sizing: border-box;
   width: 100%;
   margin-left: 0;
   clip-path: none;
+  background: var(--well);
+  border: 1px solid var(--well-line);
+  border-radius: var(--r-card);
+  padding: 8px 14px;
 }
+
+.sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats'] {
+  flex-wrap: nowrap;
+}
+
 .sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats'] > .sf-stat {
   box-sizing: border-box;
   flex: 1 1 25%;
@@ -21,9 +41,122 @@
   max-width: none;
   padding-right: 12px;
 }
-/* The stock leading clip hid this inset and border. Without it, align the
-   first tile's box and text with the head instead of shifting the strip. */
+
 .sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats'] > .sf-stat:first-child {
   border-left: 0;
   padding-left: 0;
+}
+
+.sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats'] > .sf-stat:last-child {
+  padding-right: 0;
+}
+
+.sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats'] > .sf-stat + .sf-stat {
+  border-left: 1px solid var(--l1);
+  padding-left: 14px;
+}
+
+.sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats-compact'] {
+  flex-wrap: wrap;
+  row-gap: 8px;
+  column-gap: 12px;
+}
+
+.sf-main[data-role='herd.console'] .sf-stats[data-role='herd.stats-compact'] > .sf-stat {
+  box-sizing: border-box;
+  flex: 1 1 44%;
+  min-width: 0;
+  max-width: none;
+  border-left: 0;
+  padding: 0;
+}
+
+/* Session table card: neutralize Tern's -7px grid overhang so rounded borders never
+   clip leading cell padding or the selected accent bar, and indent Terminal text cleanly. */
+.sf-main[data-role='herd.console'] .sf-table {
+  background: var(--card);
+  border: 1px solid var(--l1);
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+
+.sf-main[data-role='herd.console'] .sf-tbl {
+  margin-left: 0;
+  margin-right: 0;
+  width: 100%;
+}
+
+.sf-main[data-role='herd.console'] .sf-tbl-h:first-child,
+.sf-main[data-role='herd.console'] .sf-tbl-c:first-child {
+  padding-left: 15px;
+  border-left: 3px solid transparent;
+}
+
+.sf-main[data-role='herd.console'] .sf-tbl-h:last-child,
+.sf-main[data-role='herd.console'] .sf-tbl-c:last-child {
+  padding-right: 14px;
+}
+
+.sf-main[data-role='herd.console'] .sf-tbl-row.head {
+  background: var(--tbl-head);
+  border-bottom: 1px solid var(--l1);
+}
+
+.sf-main[data-role='herd.console'] .sf-tbl-row:not(.head):hover,
+.sf-main[data-role='herd.console'] .sf-tbl-row:not(.head):hover > .sf-tbl-c {
+  background: var(--l1);
+}
+
+.sf-main[data-role='herd.console'] .sf-tbl-row.sel,
+.sf-main[data-role='herd.console'] .sf-tbl-row.sel > .sf-tbl-c {
+  background: light-dark(rgb(from var(--accent) r g b / 12%), rgb(from var(--accent) r g b / 22%)) !important;
+}
+
+.sf-main[data-role='herd.console'] .sf-tbl-row.sel > .sf-tbl-c:first-child {
+  border-left-color: var(--accent);
+}
+
+/* Elevated detail inspector card and separated action bar. */
+.sf-main[data-role='herd.console'] [data-role='herd.detail'] {
+  background: var(--card);
+  border: 1px solid var(--l2);
+  border-radius: var(--r-card);
+}
+
+.sf-main[data-role='herd.console'] [data-role='herd.actions'] {
+  border-top: 1px solid var(--l1);
+  padding-top: 10px;
+  margin-top: 2px;
+}
+
+/* Logs card: wrap header meta & actions cleanly on narrow widths; code-tinted log box. */
+.sf-main[data-role='herd.console'] [data-role='herd.logs'] .sf-card-head {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.sf-main[data-role='herd.console'] [data-role='herd.logs'] .sf-card-meta {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.sf-main[data-role='herd.console'] [data-role='herd.logbox'] {
+  background: var(--code-bg);
+  border: 1px solid var(--l1);
+  border-radius: var(--r-ctl);
+  padding: 8px 10px;
+}
+
+.sf-main[data-role='herd.console'] [data-role='herd.activity.event'] {
+  padding: 8px 10px;
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--l1);
+  background: var(--well);
+}
+
+/* Compact dock bar anchored to the bottom hairline. */
+.sf-dock[data-role='herd.dock'] {
+  background: var(--panel);
+  border-top: 1px solid var(--l1);
+  padding: 6px 16px !important;
 }

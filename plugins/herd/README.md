@@ -4,7 +4,7 @@ A Tern plugin that shows herdr-core's terminals (`hc ls --json --all`) in a bloc
 a herd run (a lead agent and its builders in git worktrees) can be watched and
 steered from Tern without typing `hc` commands.
 
-Requires **Tern 0.9.12 or later** and herdr-core **0.1.18 or later**. Linux is
+Requires **Tern 0.9.12 or later** and herdr-core **0.1.18 or later**. Linux and Windows are
 tested; macOS is untested.
 
 ```
@@ -294,11 +294,12 @@ before that check; remote/unknown Tern hosts are refused before any filesystem
 scan. Native opening rechecks selection, scope, source, saved specs and current
 local host, so changing preferences cannot retarget an already queued open.
 
-The scanner requires **GNU find on Linux** (`-printf`); macOS/BSD find is
+The scanner supports **Linux (GNU find `-printf`)** and **Windows (`tern.fs`
+pre-check with PowerShell `LastWriteTimeUtc`)**; macOS/BSD find is
 unsupported and macOS remains untested. It uses argv, never a shell command,
-follows no nested symlink directories, and prunes unrelated subdirectories.
-Each scan has a two-second timeout, at most 256 candidates and 64 KiB of
-output; exceeding a bound, missing GNU find or malformed output disables the
+follows no nested symlink or reparse-point directories, and prunes unrelated subdirectories.
+Each scan has a bounded timeout, at most 256 candidates and 64 KiB of
+output; exceeding a bound, missing scanner tools or malformed output disables the
 result with an honest error rather than picking a possibly stale “newest”
 file. No artifact file contents are loaded until you explicitly open a matching
 document.
@@ -308,7 +309,7 @@ document.
 From any tab, choose **Next Herd terminal that needs you**
 (`plugin.herd.next_needs`) or **Previous Herd terminal that needs you**
 (`plugin.herd.previous_needs`) in the palette. Their global shortcuts are
-**Ctrl+Alt+Shift+J** / **Ctrl+Alt+Shift+U** (⌘⌥⇧J / ⌘⌥⇧U on macOS,
+**Ctrl+Alt+Shift+J** / **Ctrl+Alt+Shift+Y** (⌘⌥⇧J / ⌘⌥⇧Y on macOS,
 untested). Inside the console, press `]` / `[`.
 
 Navigation focuses, unparks or opens the current session's console and only
@@ -441,7 +442,7 @@ observation limits.
   `hc ls --json --all` (`--label run=<id>` for a run scope) every 2 s with
   one `tern.timer` per live block and
   `tern.process.run` (10 s timeout), and runs `hc get`, `hc read`, `hc send`
-  and `hc interrupt`. It finds `hc` by name, then at `$HOME/.local/bin/hc`,
+  and `hc interrupt`. It finds `hc` by name, then at `%LOCALAPPDATA%\Programs\herdr-core\hc.exe` on Windows, `$HOME/.local/bin/hc`,
   `/usr/local/bin/hc` and `/usr/bin/hc` (a daemon started by a launcher may
   have a short PATH).
 - An `hc ls` answer identical to the last one is not parsed again. Parsing,

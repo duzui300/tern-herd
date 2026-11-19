@@ -7,6 +7,18 @@ in the same commit; see [AGENTS.md](AGENTS.md#releases).
 
 ## [Unreleased]
 
+### Added
+
+- Windows support: `USERPROFILE` home resolution, `%LOCALAPPDATA%\Programs\herdr-core\hc.exe` discovery, case-insensitive `~` folding, backslash path splitting, Windows argument quoting, and local artifact discovery via `tern.fs` and PowerShell `LastWriteTimeUtc`.
+- Agent icons for Antigravity (`antigravity`, `agy`), OpenCode (`opencode`) and Windows shells (`powershell`, `pwsh`, `cmd`).
+- Filter tab counts on **All**, **Working** and **Done** alongside **Needs you**, and a 2×2 compact stats grid on ultra-narrow (< 48 columns) splits.
+
+### Changed
+
+- **Previous Herd terminal that needs you** now binds **Ctrl+Alt+Shift+Y** (⌘⌥⇧Y on macOS) instead of **Ctrl+Alt+Shift+U** to avoid colliding with Tern's default keymap preset.
+- **Float Watch** (`p`) and **Dock Watch** (`d`) keep keyboard focus on the Herd console, and dismissing **Send**, **Interrupt** or **Run scope** dialogs restores focus to the console.
+- Refined table card styling, selected-row contrast and 3px leading accent stripe in light and dark themes, leading cell indentation, and responsive Logs card header wrapping on narrow panes.
+
 ## [0.3.0] - 2026-11-05
 
 ### Added

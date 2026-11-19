@@ -166,7 +166,7 @@ tern.command({
 })
 local needs_prefix = if tern.runtime.os == "macos" then "cmd+alt+shift+" else "ctrl+alt+shift+"
 tern.bind(needs_prefix .. "j", "plugin.herd.next_needs")
-tern.bind(needs_prefix .. "u", "plugin.herd.previous_needs")
+tern.bind(needs_prefix .. "y", "plugin.herd.previous_needs")
 
 local function choose_scope(cx: WindowCx, block: number, request: common.WindowRequest)
 	local items: { PickItem } = {
@@ -179,12 +179,19 @@ local function choose_scope(cx: WindowCx, block: number, request: common.WindowR
 	end
 	cx:pick({ items = items, placeholder = "Choose Herd run scope", icon = "users" })
 		:next(function(choice: PickItem?, _err: string?, wcx: WindowCx?)
-			if not choice or not wcx then return end
+			if not choice or not wcx then
+				local fcx = wcx or cx
+				pcall(function() fcx.layout:focus(block) end)
+				return
+			end
 			if choice.typed then
 				wcx:prompt({ placeholder = "Run label (run=…)", action = "switch" })
 					:next(function(value: string?, _why: string?, current: WindowCx?)
 						if value and current then
 							current.session:event(block, { ev = "action", id = "main", act = "herd_scope=" .. tern.json.encode(value) })
+						else
+							local fcx = current or wcx
+							pcall(function() fcx.layout:focus(block) end)
 						end
 					end)
 			else
@@ -217,11 +224,12 @@ end
 -- Writable Attach always creates a split. Only registered read-only viewers
 -- participate in Watch reuse and its float/dock/park controls.
 local function create_viewer(cx: WindowCx, beside: number, address: string, mode: viewers.Mode, binary: string): number?
-	local line = common.quote(binary) .. " attach "
+	local win = tern.runtime.os == "windows"
+	local line = common.quote(binary, win) .. " attach "
 	if mode == "read" then
 		line ..= "--observe --history 200 "
 	end
-	line ..= common.quote(address)
+	line ..= common.quote(address, win)
 	local pane = cx.layout:split(beside, "right", { command = line }, { focus = true })
 	if pane == nil then
 		cx:toast("error", "Could not open a split for " .. address, line)
@@ -307,15 +315,23 @@ local function use_viewer(cx: WindowCx, source: number, request: common.WindowRe
 			viewer_notice(cx, source, request, "Watch viewer is already floating.")
 			return
 		end
-		local ok, err = cx.layout:float(viewer, source, "br", { focus = true })
-		if not ok then cx:toast("error", "Could not float Watch viewer", err) end
+		local ok, err = cx.layout:float(viewer, source, "br", { focus = false })
+		if ok then
+			cx.layout:focus(source)
+		else
+			cx:toast("error", "Could not float Watch viewer", err)
+		end
 	elseif verb == "dock" then
 		if not info.floating then
 			viewer_notice(cx, source, request, "Watch viewer is already docked.")
 			return
 		end
-		local ok, err = cx.layout:dock(viewer, source, "right", { focus = true })
-		if not ok then cx:toast("error", "Could not dock Watch viewer", err) end
+		local ok, err = cx.layout:dock(viewer, source, "right", { focus = false })
+		if ok then
+			cx.layout:focus(source)
+		else
+			cx:toast("error", "Could not dock Watch viewer", err)
+		end
 	else
 		cx.layout:focus(viewer)
 	end
@@ -325,6 +341,8 @@ local function ask_send(cx: WindowCx, block: number, address: string, label: str
 	cx:prompt({ placeholder = "Prompt for " .. label, icon = "send", action = "review" })
 		:next(function(text: string?, _err: string?, cx2: WindowCx?)
 			if text == nil or string.match(text :: string, "^%s*$") or cx2 == nil then
+				local fcx = cx2 or cx
+				pcall(function() fcx.layout:focus(block) end)
 				return
 			end
 			local wcx = cx2 :: WindowCx
@@ -342,6 +360,8 @@ local function ask_send(cx: WindowCx, block: number, address: string, label: str
 					local value = tern.json.encode({ address = address, text = text, generation = generation })
 					wcx3.session:event(block, { ev = "action", id = "main", act = "herd_send=" .. value })
 				end
+				local fcx = cx3 or wcx
+				pcall(function() fcx.layout:focus(block) end)
 			end)
 		end)
 end
@@ -352,7 +372,7 @@ local function ask_interrupt(cx: WindowCx, block: number, address: string, label
 			{ label = "Interrupt " .. label, detail = "hc interrupt " .. address, icon = "stop", go = true },
 			{ label = "Cancel", icon = "x", go = false },
 		},
-		placeholder = "Press the stop key in " .. label .. "?",
+		placeholder = "Interrupt " .. label .. " with the stop key?",
 		icon = "stop",
 		action = "choose",
 	}):next(function(choice: PickItem?, _err: string?, cx2: WindowCx?)
@@ -360,6 +380,8 @@ local function ask_interrupt(cx: WindowCx, block: number, address: string, label
 			local wcx: WindowCx = cx2
 			wcx.session:event(block, { ev = "action", id = "main", act = "herd_interrupt=" .. tern.json.encode({ address = address, generation = generation }) })
 		end
+		local fcx = cx2 or cx
+		pcall(function() fcx.layout:focus(block) end)
 	end)
 end
 
@@ -465,7 +487,7 @@ local function open_artifact(cx: WindowCx, source: number, request: common.Windo
 		return
 	end
 	local path = request.path
-	if path == nil or string.sub(path, 1, 1) ~= "/" then
+	if path == nil or not common.is_absolute(path) then
 		cx:toast("error", "Cannot open Herd artifact", "The artifact path must be absolute.")
 		return
 	end

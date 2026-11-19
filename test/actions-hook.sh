@@ -908,7 +908,7 @@ case "$ACTION_CASE" in
     ;;
   interrupt)
     ctl key x >/dev/null
-    wait_text 'Press the stop key in spam-192'
+    wait_text 'Interrupt spam-192'
     ctl key Enter >/dev/null
     wait_action '^interrupt t44$'
     echo 'interrupt: confirmed action reached fake hc only'
@@ -1257,13 +1257,13 @@ case "$ACTION_CASE" in
   needs-bindings)
     # Inspect effective resolution, not just source text or declared bindings.
     # Canonical chord spelling varies by platform, so compare normalized words.
-    check_lua "local keys = cx.actions:keys(); for _, spec in {{'plugin.herd.next_needs','j'}, {'plugin.herd.previous_needs','u'}} do local action = cx.actions:describe(spec[1]); assert(action.id == spec[1] and action.available and #action.keys > 0); local found = false; for chord, ids in keys do local c = string.lower(chord); local modifier = string.find(c,'ctrl',1,true) or string.find(c,'cmd',1,true) or string.find(c,'control',1,true) or string.find(c,'command',1,true); if modifier and string.find(c,'alt',1,true) and string.find(c,'shift',1,true) and string.sub(c,-1) == spec[2] and ids[1] == spec[1] then assert(table.find(action.keys,chord), 'describe/keys disagree'); found = true end end; assert(found, 'effective global chord missing for ' .. spec[1]) end"
+    check_lua "local keys = cx.actions:keys(); for _, spec in {{'plugin.herd.next_needs','j'}, {'plugin.herd.previous_needs','y'}} do local action = cx.actions:describe(spec[1]); assert(action.id == spec[1] and action.available and #action.keys > 0); local found = false; for chord, ids in keys do local c = string.lower(chord); local modifier = string.find(c,'ctrl',1,true) or string.find(c,'cmd',1,true) or string.find(c,'control',1,true) or string.find(c,'command',1,true); if modifier and string.find(c,'alt',1,true) and string.find(c,'shift',1,true) and string.sub(c,-1) == spec[2] and ids[1] == spec[1] then assert(table.find(action.keys,chord), 'describe/keys disagree'); found = true end end; assert(found, 'effective global chord missing for ' .. spec[1]) end"
     # This Tern's headless modified-key input also misses built-in shortcuts.
     # Dispatch the effective chord's highest-priority action, not a hardcoded
     # substitute; plain console bracket input is covered by needs-cycle.
     check_lua "local ids = cx.actions:keys()['ctrl+alt+shift+j']; assert(ids and ids[1] == 'plugin.herd.next_needs'); cx.actions:run(ids[1])"
     wait_cursor t62
-    check_lua "local ids = cx.actions:keys()['ctrl+alt+shift+u']; assert(ids and ids[1] == 'plugin.herd.previous_needs'); cx.actions:run(ids[1])"
+    check_lua "local ids = cx.actions:keys()['ctrl+alt+shift+y']; assert(ids and ids[1] == 'plugin.herd.previous_needs'); cx.actions:run(ids[1])"
     wait_cursor t63
     no_terminal_actions
     echo 'needs bindings: effective keys/describe agree and both highest-priority shortcut actions navigate; synthetic modifier input unverified'
@@ -1535,7 +1535,7 @@ case "$ACTION_CASE" in
       wait_text 'Send this prompt with hc send?'
     else
       ctl key x >/dev/null
-      wait_text 'Press the stop key in b1-cart'
+      wait_text 'Interrupt b1-cart'
     fi
     scope_event checkout
     wait_scope checkout 0 1 0

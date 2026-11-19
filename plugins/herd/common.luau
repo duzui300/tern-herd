@@ -22,14 +22,21 @@ export type Term = {
 	reason: string?,
 }
 
--- `hc` by name first, then where it is installed: a daemon started by systemd
--- or a desktop launcher often has a PATH without ~/.local/bin.
-local home = tern.getenv("HOME")
+-- `hc` by name first, then common Windows and POSIX install locations.
+local home = tern.getenv("HOME") or tern.getenv("USERPROFILE")
+local local_appdata = tern.getenv("LOCALAPPDATA")
+M.HOME = home
 M.HC = { "hc" }
-local paths = { "/usr/local/bin/hc", "/usr/bin/hc" }
-if home then
-	table.insert(paths, 1, home .. "/.local/bin/hc")
+local paths: { string } = {}
+if local_appdata and local_appdata ~= "" then
+	table.insert(paths, local_appdata .. "\\Programs\\herdr-core\\hc.exe")
 end
+if home and home ~= "" then
+	table.insert(paths, home .. "\\AppData\\Local\\Programs\\herdr-core\\hc.exe")
+	table.insert(paths, home .. "/.local/bin/hc")
+end
+table.insert(paths, "/usr/local/bin/hc")
+table.insert(paths, "/usr/bin/hc")
 for _, path in paths do
 	if not table.find(M.HC, path) then
 		table.insert(M.HC, path)
@@ -69,8 +76,61 @@ export type WindowRequest = {
 	config: string?,
 }
 
--- One POSIX shell word.
-function M.quote(s: string): string
+function M.is_windows_path(path: string): boolean
+	return string.match(path, "^%a:[/\\]") ~= nil
+end
+
+function M.is_absolute(path: string): boolean
+	return string.sub(path, 1, 1) == "/" or M.is_windows_path(path)
+end
+
+local function norm_slashes(path: string): string
+	return (string.gsub(path, "\\", "/"))
+end
+
+function M.tilde(path: string): string
+	if not home or home == "" then
+		return path
+	end
+	local win = M.is_windows_path(home)
+	local np = string.gsub(norm_slashes(path), "/+$", "")
+	local nh = string.gsub(norm_slashes(home), "/+$", "")
+	local cmp_p = if win then string.lower(np) else np
+	local cmp_h = if win then string.lower(nh) else nh
+	if cmp_p == cmp_h then
+		return "~"
+	end
+	if string.sub(cmp_p, 1, #cmp_h + 1) == cmp_h .. "/" then
+		local sep = if string.find(path, "\\", 1, true) and not string.find(path, "/", 1, true) then "\\" else "/"
+		return "~" .. sep .. string.sub(path, #nh + 2)
+	end
+	return path
+end
+
+function M.leaf(cwd: string): string
+	if cwd == "" then
+		return ""
+	end
+	if home and home ~= "" and M.tilde(cwd) == "~" then
+		return "~"
+	end
+	return string.match(cwd, "([^/\\]+)[/\\]*$") or cwd
+end
+
+function M.split_parent_leaf(path: string): (string?, string?)
+	local clean = string.gsub(path, "[/\\]+$", "")
+	local dir, leaf = string.match(clean, "^(.*[/\\])([^/\\]+)$")
+	return dir, leaf
+end
+
+-- Quotes one command argument for POSIX shells or Windows PowerShell/cmd.
+function M.quote(s: string, windows: boolean?): string
+	if windows then
+		if string.match(s, "^[%w%-%._/=:@\\]+$") then
+			return s
+		end
+		return '"' .. (string.gsub(s, '"', '\\"')) .. '"'
+	end
 	if string.match(s, "^[%w%-%._/=:@]+$") then
 		return s
 	end
