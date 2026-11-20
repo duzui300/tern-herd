@@ -6,6 +6,28 @@ local M = {}
 M.KIND = "herd.herd"
 M.OPEN_ACTION = "plugin.herd.open"
 
+-- Agent CLIs the Herd console can start through hc, in menu order. `args`
+-- follow the program (Codex needs --no-daemon to keep its commands in hc).
+export type AgentOption = {
+	id: string,
+	label: string,
+	command: string,
+	args: { string }?,
+	icon: string?,
+	detail: string,
+}
+
+M.AGENTS = {
+	{ id = "omp", label = "omp", command = "omp", icon = "app-omp", detail = "omp" },
+	{ id = "claude", label = "Claude Code", command = "claude", icon = "app-claude", detail = "claude" },
+	{ id = "codex", label = "Codex", command = "codex", args = { "--no-daemon" }, icon = "app-codex", detail = "codex --no-daemon" },
+	{ id = "agy", label = "Antigravity", command = "agy", icon = "provider-google", detail = "agy" },
+	{ id = "pi", label = "Pi", command = "pi", icon = "pi-mark", detail = "pi" },
+	{ id = "gemini", label = "Gemini CLI", command = "gemini", icon = "sparkle", detail = "gemini" },
+	{ id = "opencode", label = "opencode", command = "opencode", icon = "code", detail = "opencode" },
+	{ id = "hermes", label = "Hermes", command = "hermes", icon = "app-hermes", detail = "hermes" },
+} :: { AgentOption }
+
 -- Normalized hc list row, shared without per-observation projection copies.
 export type Term = {
 	address: string,
@@ -48,6 +70,42 @@ M.KV_HC = "hc_path"
 M.KV_SCOPES = "recent_scopes"
 M.KV_PANE_SCOPES = "pane_scopes"
 
+-- The first PATH entry holding `name`, or nil. Windows tries PATHEXT
+-- suffixes; a name with a separator is taken as a path.
+function M.find_executable(name: string): string?
+	if name == "" then return nil end
+	if string.find(name, "[/\\]") then
+		return if tern.fs.exists(name) then name else nil
+	end
+	local windows = tern.runtime.os == "windows"
+	local sep = if windows then ";" else ":"
+	local dirs: { string } = {}
+	for dir in string.gmatch(tern.getenv("PATH") or "", "([^" .. sep .. "]+)") do
+		local clean = string.gsub(dir, '^"', "")
+		clean = string.gsub(clean, '"$', "")
+		if clean ~= "" then table.insert(dirs, clean) end
+	end
+	local suffixes: { string } = { "" }
+	if windows then
+		for ext in string.gmatch(tern.getenv("PATHEXT") or ".COM;.EXE;.BAT;.CMD", "([^;]+)") do
+			local lower = string.lower(ext)
+			if not table.find(suffixes, lower) then table.insert(suffixes, lower) end
+		end
+	end
+	for _, dir in dirs do
+		local base = dir
+		local last = string.sub(base, #base)
+		if last ~= "/" and last ~= "\\" then
+			base ..= if windows then "\\" else "/"
+		end
+		for _, suffix in suffixes do
+			local candidate = base .. name .. suffix
+			if tern.fs.exists(candidate) then return candidate end
+		end
+	end
+	return nil
+end
+
 function M.scope(value: any): string?
 	if type(value) ~= "string" then return nil end
 	local clean = string.match(value, "^%s*(.-)%s*$") or ""
@@ -67,6 +125,7 @@ export type WindowRequest = {
 	hc: string,
 	mode: ("read" | "write")?,
 	agent: boolean?,
+	agents: { AgentOption }?,
 	expires: number,
 	owner: string?,
 	viewer_owner: string?,

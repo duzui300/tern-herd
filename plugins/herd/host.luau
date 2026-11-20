@@ -11,7 +11,8 @@
 -- s sends a prompt, x interrupts, w opens its worktree in a git block, f focuses the
 -- selected terminal's subtree, h shows finished terminals,
 -- m mutes the toasts, r refreshes now, [/] select previous/next needs-you,
--- v opens the activity inbox; Esc closes the inbox, logs, then the focus.
+-- v opens the activity inbox, n starts an agent with hc and attaches to it;
+-- Esc closes the inbox, logs, then the focus.
 -- Only s and x change terminals, and the window half asks before either.
 --
 -- Window-only work travels as inert surface metadata. Windows claim a
@@ -34,6 +35,7 @@ local LS_TIMEOUT_MS = 10 * 1000
 local GET_TIMEOUT_MS = 10 * 1000
 local READ_TIMEOUT_MS = 30 * 1000
 local ACT_TIMEOUT_MS = 60 * 1000
+local START_TIMEOUT_MS = 30 * 1000
 local READ_LINES = 40
 local NOTICE_S = 20
 local DETAIL_DEBOUNCE_MS = 200
@@ -198,6 +200,7 @@ type State = {
 	artifact_pending: boolean,
 	read_busy: boolean,
 	act_busy: boolean,
+	start_busy: boolean,
 	scope_busy: boolean,
 	pending_read: string?,
 	pending_next: number?,
@@ -1423,6 +1426,7 @@ local function head_view(state: State): Node
 		})
 	end
 	local controls: { Node } = {
+		button("Start agent…", "start_agent", { icon = "plus", keys = { "n" }, busy = state.start_busy, title = "Start an agent with hc and attach to it (N)" }),
 		button("Scope…", "scope", { icon = "funnel", keys = { "u" }, title = "Switch run scope (U)" }),
 		ui.node("row", { key = "activity_control", gap = "xs", align = "center" }, {
 			toggle("Activity", "history", "activity", state.inbox, "v", "Observed activity inbox (V); opening does not mark read"),
@@ -2130,7 +2134,7 @@ local function enqueue_window(state: State, verb: string, address: string, label
 		id = tostring(tern.now()) .. ":" .. request_serial,
 		verb = verb, address = address, label = label,
 		hc = hc_path or "hc", expires = tern.now() + 5000,
-		mode = if verb == "attach" then "write"
+		mode = if verb == "attach" or verb == "attach_new" then "write"
 			elseif read then "read" else nil,
 		agent = if read and term and agent_like(term) then true else nil,
 		generation = state.scope_epoch,
@@ -2150,6 +2154,10 @@ local function enqueue_window(state: State, verb: string, address: string, label
 						entry.waiting, entry.loading = false, false
 						entry.error = "Local artifacts unavailable: no window confirmed a local Tern host."
 					end
+				elseif verb == "start_agent" then
+					set_notice(state, "No Herd window opened the agent menu; try again.", "warning")
+				elseif verb == "attach_new" then
+					set_notice(state, "No Herd window attached " .. label .. "; try again.", "warning")
 				else
 					set_notice(state, "No Herd window completed " .. verb .. " for " .. label .. "; try again.", "warning")
 				end
@@ -2159,6 +2167,119 @@ local function enqueue_window(state: State, verb: string, address: string, label
 		end
 	end)
 	return request
+end
+
+-- Herd starts agents itself: the catalog's programs that resolve on PATH.
+-- With none found, keep the whole catalog so a sparse PATH cannot hide the
+-- menu; hc's own spawn error then explains a failed start.
+local function agent_options(): { common.AgentOption }
+	local found: { common.AgentOption } = {}
+	for _, option in common.AGENTS do
+		if common.find_executable(option.command) then
+			table.insert(found, option)
+		end
+	end
+	return if #found > 0 then found else common.AGENTS
+end
+
+-- hc keeps names unique among live terminals; finished ones free theirs.
+local function fresh_name(state: State, base: string): string
+	local used: { [string]: boolean } = {}
+	for _, term in state.terms or {} do
+		if term.state == "live" and term.name then used[term.name] = true end
+	end
+	if not used[base] then return base end
+	for i = 2, 99 do
+		local name = base .. "-" .. i
+		if not used[name] then return name end
+	end
+	return base .. "-" .. tostring(os.time())
+end
+
+-- Asks one window for the agent menu; the chosen id comes back as herd_start.
+local function ask_start_agent(state: State)
+	for _, pending in state.requests do
+		if pending.verb == "start_agent" then return end
+	end
+	local options = agent_options()
+	if #options == 0 then
+		set_notice(state, "No agent CLI is installed for Herd to start.", "warning")
+		return
+	end
+	local request = enqueue_window(state, "start_agent", "", "an agent")
+	if request then request.agents = options end
+	state.cx:render()
+end
+
+-- hc run --bg starts the chosen agent; its reply carries the new address, so
+-- an interactive attach opens at once and the console selects that terminal.
+local function start_agent(state: State, id: string)
+	if state.start_busy then
+		set_notice(state, "An agent is still starting; wait for its result.", "warning")
+		return
+	end
+	local chosen: common.AgentOption? = nil
+	for _, option in common.AGENTS do
+		if option.id == id then chosen = option; break end
+	end
+	if chosen == nil then
+		set_notice(state, "Unknown agent: " .. id, "error")
+		return
+	end
+	local option = chosen :: common.AgentOption
+	local name = fresh_name(state, option.id)
+	local args: { string } = { "run", "--bg", "--json", "--name", name }
+	local cwd = state.cx.cwd
+	if cwd ~= "" and common.is_absolute(cwd) then
+		table.insert(args, "--cwd")
+		table.insert(args, cwd)
+	end
+	if state.run then
+		table.insert(args, "--label")
+		table.insert(args, "run=" .. (state.run :: string))
+	end
+	-- Program flags follow the program: hc stops parsing its own there.
+	table.insert(args, option.command)
+	for _, extra in option.args or {} do
+		table.insert(args, extra)
+	end
+	state.start_busy = true
+	set_notice(state, "Starting " .. option.label .. "…", "muted")
+	state.cx:render()
+	local spawn_error = run_hc(args, START_TIMEOUT_MS, function(result)
+		if not alive(state) then return end
+		state.start_busy = false
+		if result.status ~= 0 then
+			set_notice(state, failure(result, "hc run", START_TIMEOUT_MS), "error")
+			state.cx:render()
+			return
+		end
+		local address: string? = nil
+		local said_name: string? = nil
+		local ok, data = pcall(tern.json.decode, result.stdout)
+		if ok and type(data) == "table" then
+			address = str(data.address)
+			said_name = str(data.name)
+		end
+		if address == nil then
+			set_notice(state, "hc started " .. option.label .. " but printed no address; check hc ls.", "warning")
+			state.cx:render()
+			refresh(state, true)
+			return
+		end
+		local started = address :: string
+		local label = (said_name or name) .. " (" .. started .. ")"
+		set_notice(state, "Started " .. option.label .. " as " .. label .. ".", "success")
+		state.inbox = false
+		state.cursor = started
+		enqueue_window(state, "attach_new", started, label)
+		refresh(state, true)
+		state.cx:render()
+	end)
+	if spawn_error then
+		state.start_busy = false
+		set_notice(state, "Tern could not start hc: " .. spawn_error, "error")
+	end
 end
 
 -- Discovery waits for one window to confirm that this Herd source belongs
@@ -2427,6 +2548,11 @@ local function on_action(state: State, cx: BlockCx, act_name: string, value: str
 		end
 	elseif act_name == "activity_clear_cancel" then
 		state.clear_armed = nil
+	elseif act_name == "start_agent" then
+		ask_start_agent(state)
+	elseif act_name == "herd_start" and value then
+		local ok, data = pcall(tern.json.decode, value)
+		if ok and type(data) == "table" and str(data.id) then start_agent(state, data.id :: string) end
 	elseif act_name == "scope" then
 		ask_window(state, cx, "scope")
 	elseif act_name == "herd_scope" and value then
@@ -2493,7 +2619,7 @@ tern.block.define("herd", {
 				run = v
 			end
 			local action = string.match(a, "^initial_action=(.+)$")
-			if action == "scope" or action == "herd_next=1" or action == "herd_next=-1" then
+			if action == "scope" or action == "start_agent" or action == "herd_next=1" or action == "herd_next=-1" then
 				initial_action = action
 			end
 		end
@@ -2555,6 +2681,7 @@ tern.block.define("herd", {
 			artifact_pending = false,
 			read_busy = false,
 			act_busy = false,
+			start_busy = false,
 			scope_busy = false,
 			pending_read = nil,
 			pending_next = nil,
@@ -2716,6 +2843,8 @@ tern.block.define("herd", {
 			toggle_finished(state)
 		elseif k == "m" then
 			toggle_mute(state)
+		elseif k == "n" then
+			on_action(state, cx, "start_agent")
 		elseif k == "u" then
 			ask_window(state, cx, "scope")
 		elseif k == "r" then

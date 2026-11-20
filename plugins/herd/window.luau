@@ -1,7 +1,7 @@
 --!strict
 -- Host-originated window actions use the inert surface mailbox, not URL effects.
 -- The host grants each request to one window, even with multiple replicas.
--- This half also owns the palette command, key and status segment.
+-- This half also owns the palette commands, key and status segment.
 
 local common = require("./common")
 local viewers = require("./viewers")
@@ -157,6 +157,15 @@ tern.command({
 })
 
 tern.command({
+	id = "start_agent",
+	title = "Start herd agent…",
+	icon = "users",
+	run = function(cx: WindowCx)
+		open_herd(cx, "start_agent")
+	end,
+})
+
+tern.command({
 	id = "next_needs", title = "Next Herd terminal that needs you", icon = "users",
 	run = function(cx: WindowCx) open_herd(cx, "herd_next=1") end,
 })
@@ -196,6 +205,33 @@ local function choose_scope(cx: WindowCx, block: number, request: common.WindowR
 					end)
 			else
 				wcx.session:event(block, { ev = "action", id = "main", act = "herd_scope=" .. tern.json.encode(choice.run) })
+			end
+		end)
+end
+
+-- The console asks for an agent menu; the chosen id goes back to the host as
+-- herd_start, which starts it with hc and opens the attach pane.
+local function pick_agent(cx: WindowCx, block: number, request: common.WindowRequest)
+	local items: { PickItem } = {}
+	local agents = request.agents
+	if agents then
+		for _, option in agents do
+			table.insert(items, {
+				label = option.label,
+				detail = option.detail,
+				icon = option.icon,
+				id = option.id,
+			})
+		end
+	end
+	if #items == 0 then
+		cx:toast("error", "No agent CLI to start", "Install one, or start it in a terminal of its own.")
+		return
+	end
+	cx:pick({ items = items, placeholder = "Start agent", icon = "users", action = "start" })
+		:next(function(choice: PickItem?, _err: string?, wcx: WindowCx?)
+			if choice and wcx and type(choice.id) == "string" then
+				wcx.session:event(block, { ev = "action", id = "main", act = "herd_start=" .. tern.json.encode({ id = choice.id }) })
 			end
 		end)
 end
@@ -528,6 +564,10 @@ local function dispatch(cx: WindowCx, pane: number, request: common.WindowReques
 	local verb, address, name = request.verb, request.address, request.label
 	if verb == "watch" or verb == "attach" or verb == "float" or verb == "dock" or verb == "park" then
 		use_viewer(cx, pane, request)
+	elseif verb == "start_agent" then
+		pick_agent(cx, pane, request)
+	elseif verb == "attach_new" then
+		create_viewer(cx, pane, address, "write", request.hc, request.agent)
 	elseif verb == "send" then
 		ask_send(cx, pane, address, name, request.generation)
 	elseif verb == "interrupt" then

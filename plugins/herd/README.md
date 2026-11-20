@@ -8,7 +8,7 @@ Requires **Tern 0.9.12 or later** and herdr-core **0.1.18 or later**. Linux and 
 tested; macOS is untested.
 
 ```
-Herd   herdr-core                     [Scope… u] [Activity v] 5 [Show finished h] [Mute toasts m] [Refresh r]
+Herd   herdr-core          [Start agent… n] [Scope… u] [Activity v] 5 [Show finished h] [Mute toasts m] [Refresh r]
 
 Worktrees        Turns
 9                108
@@ -33,7 +33,8 @@ The block opens in Tern's sans face and follows Tern's page layout (Designing
 Views):
 
 - **Head row**: the title, `herdr-core` and the current run label, with
-  **Scope…** (`u`), **Activity** (`v`, with an unread badge),
+  **Start agent…** (`n`), **Scope…** (`u`), **Activity** (`v`, with an
+  unread badge),
   **Show finished** (`h`), **Mute toasts** (`m`) and **Refresh** (`r`)
   controls. Run scopes switch in place; All terminals is the unfiltered
   scope. Show finished only controls row visibility; Mute toasts turns
@@ -205,6 +206,7 @@ focuses the block.
 | u | choose All terminals or a remembered/typed run label without reopening |
 | Enter / o (or double-click a row) | focus the existing read-only Watch viewer, or open `hc attach --observe --history 200 <t>`; agent terminals get a tab of their own (`Watch <address>`) so a full-screen TUI keeps its width, plain terminals split to the right; unpark it if hidden. Nothing you type reaches the agent and the terminal isn't resized |
 | a | attach: always open a new writable `hc attach <t>` split, to type into it |
+| n | start an agent: pick from the CLI catalog, then `hc run --bg` and an automatic writable attach split |
 | p | float the selected terminal's read-only Watch viewer as a peek/PiP; open one if absent; already floating or parked gives a dock notice |
 | d | dock the selected terminal's floating Watch viewer; absent, already tiled or parked gives a dock notice |
 | z | park the selected terminal's existing Watch viewer without stopping its program; absent or already parked gives a dock notice |
@@ -341,6 +343,24 @@ reload with multiple sessions, an unidentifiable parked console is left alone
 rather than taking a console from another session. Focus/ownership bookkeeping
 is bounded to 32 consoles and pruned when panes or sessions disappear.
 
+
+### Starting an agent
+
+**Start agent…** in the head row (`n`), or **Start herd agent…**
+(`plugin.herd.start_agent`) from any tab, opens the console and asks which
+agent to start. The menu lists the catalog entries whose command resolves on
+the console's `PATH`: omp, Claude Code, Codex (`--no-daemon`), Antigravity,
+Pi, Gemini CLI, opencode and Hermes. When none resolve it shows the whole
+catalog, so a sparse `PATH` cannot hide the menu.
+
+The choice runs `hc run --bg --json --name <agent> --cwd <console directory>
+[--label run=<scope>] <command>` in the host half, selects the new terminal in
+the console, and opens a writable `hc attach <address>` split beside it, like
+**Attach**. The dock reports `Started omp as omp (t12)`. Names stay unique
+among live terminals (`omp`, `omp-2`, …); a chosen run scope adds its `run`
+label so the terminal stays in view. A failed start shows hc's error in the
+dock, and dismissing the picker starts nothing. No prompt is sent: the agent
+starts interactive in its attach pane.
 
 ### Run scopes
 
